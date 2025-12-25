@@ -251,11 +251,26 @@ function DocumentPreview({ cv, textContent, isPdf, onDownloadCV, analysisResult,
 
                 <div style={{ flex: 1, background: '#525659', position: 'relative' }}>
                     {isPdf ? (
-                        <iframe
-                            src={`${cv}#toolbar=0&navpanes=0`}
-                            title="CV Preview"
-                            style={{ width: '100%', height: '100%', border: 'none' }}
-                        />
+                        <object
+                            data={cv}
+                            type="application/pdf"
+                            width="100%"
+                            height="100%"
+                            style={{ border: 'none' }}
+                        >
+                            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+                                <p style={{ marginBottom: '1rem' }}>PDF preview is blocked by your browser.</p>
+                                <a
+                                    href={cv}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="btn btn-secondary"
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem' }}
+                                >
+                                    <ExternalLink size={16} /> Open PDF in New Tab
+                                </a>
+                            </div>
+                        </object>
                     ) : (
                         <div style={{ padding: '2rem', height: '100%', overflowY: 'auto', background: 'white', color: 'black', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
                             {textContent}
