@@ -1,10 +1,19 @@
+---
+title: NeuroArc
+emoji: 🌍
+colorFrom: gray
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # NeuroArc <img src="frontend/public/favicon.svg" width="40" height="40" align="center" />
 
 > **AI-Powered Job Application Assistant**  
 > Search jobs → Match to your CV → Generate tailored CV
 
 ## ✨ Features
-
 
 - **📄 CV Parsing** - Upload PDF/DOCX and automatically extract skills, experience, and contact info.
 - **🔍 Smart Job Search** - Search real jobs from Reed API (UK's largest job board).
