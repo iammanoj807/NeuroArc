@@ -36,6 +36,6 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 # Expose the port HF Spaces uses (7860)
 EXPOSE 7860
 
-# Run the application
-# We use 'backend.main:app' and host 0.0.0.0 for Docker
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# Change to backend directory and run
+WORKDIR /app/backend
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
