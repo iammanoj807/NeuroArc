@@ -17,8 +17,11 @@ WORKDIR /app
 
 # Install system dependencies (e.g., for PyMuPDF or OpenCV if needed)
 # python-multipart needs no special system deps usually, but good to be safe
+# Added tesseract-ocr and poppler-utils for CV parsing (image-based PDFs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    tesseract-ocr \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements
