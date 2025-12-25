@@ -1,0 +1,14 @@
+# Backend dependencies for NeuroArc
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.6
+httpx==0.28.1
+python-dotenv==1.0.1
+pymupdf==1.25.1
+python-docx==1.1.2
+azure-ai-inference==1.0.0b7
+reportlab==4.2.5
+pydantic==2.10.3
+pytesseract==0.3.10
+pdf2image==1.17.0
+Pillow>=10.0.0
