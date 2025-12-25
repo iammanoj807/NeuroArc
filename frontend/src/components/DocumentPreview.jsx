@@ -67,7 +67,7 @@ function DocumentPreview({ cv, textContent, isPdf, onDownloadCV, analysisResult,
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                             {isPdf && (
                                 <a href={cv} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-full" style={{ justifyContent: 'center' }}>
-                                    View CV PDF
+                                    View CV
                                 </a>
                             )}
                             <button className="btn btn-secondary btn-full" onClick={onDownloadCV} style={{ justifyContent: 'center' }}>
@@ -137,7 +137,7 @@ function DocumentPreview({ cv, textContent, isPdf, onDownloadCV, analysisResult,
             <div className="document-viewer card fade-in" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <div className="viewer-header" style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-bg-secondary)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <span style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-text-primary)' }}>
                             <FileText size={18} /> Generated Application
                         </span>
                         {isPdf && numPages && (
@@ -148,28 +148,38 @@ function DocumentPreview({ cv, textContent, isPdf, onDownloadCV, analysisResult,
                     </div>
                     {isPdf && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <button className="btn btn-sm btn-icon" onClick={() => setScale(s => Math.max(0.6, s - 0.2))} disabled={scale <= 0.6}>
+                            <button
+                                className="btn btn-icon"
+                                onClick={() => setScale(s => Math.max(0.6, s - 0.2))}
+                                disabled={scale <= 0.6}
+                                style={{ background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.1)', color: 'var(--color-text-primary)', width: '32px', height: '32px', borderRadius: '8px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
                                 <ZoomOut size={16} />
                             </button>
-                            <span style={{ fontSize: '0.85rem', minWidth: '3ch', textAlign: 'center' }}>{Math.round(scale * 100)}%</span>
-                            <button className="btn btn-sm btn-icon" onClick={() => setScale(s => Math.min(2.0, s + 0.2))} disabled={scale >= 2.0}>
+                            <span style={{ fontSize: '0.85rem', minWidth: '3ch', textAlign: 'center', color: 'var(--color-text-primary)' }}>{Math.round(scale * 100)}%</span>
+                            <button
+                                className="btn btn-icon"
+                                onClick={() => setScale(s => Math.min(2.0, s + 0.2))}
+                                disabled={scale >= 2.0}
+                                style={{ background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.1)', color: 'var(--color-text-primary)', width: '32px', height: '32px', borderRadius: '8px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
                                 <ZoomIn size={16} />
                             </button>
-                            <div style={{ width: '1px', height: '20px', background: 'var(--color-border)', margin: '0 0.5rem' }}></div>
-                            <a href={cv} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-text">
+                            <div style={{ width: '1px', height: '20px', background: 'rgba(255, 255, 255, 0.1)', margin: '0 0.5rem' }}></div>
+                            <a href={cv} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-text" style={{ color: 'var(--color-primary)' }}>
                                 <ExternalLink size={16} />
                             </a>
                         </div>
                     )}
                 </div>
 
-                <div style={{ flex: 1, background: '#525659', position: 'relative', overflow: 'auto', display: 'flex', justifyContent: 'center', padding: '2rem' }}>
+                <div style={{ flex: 1, background: 'transparent', position: 'relative', overflow: 'auto', display: 'flex', justifyContent: 'center', padding: '2rem' }}>
                     {isPdf ? (
                         <Document
                             file={cv}
                             onLoadSuccess={onDocumentLoadSuccess}
-                            loading={<div style={{ color: 'white' }}>Loading PDF...</div>}
-                            error={<div style={{ color: 'white', textAlign: 'center' }}>
+                            loading={<div style={{ color: 'var(--color-text-muted)' }}>Loading PDF...</div>}
+                            error={<div style={{ color: 'var(--color-warning)', textAlign: 'center' }}>
                                 <p>Failed to load PDF preview.</p>
                                 <a href={cv} target="_blank" className="btn btn-primary" style={{ marginTop: '1rem' }}>Download Instead</a>
                             </div>}
@@ -191,11 +201,21 @@ function DocumentPreview({ cv, textContent, isPdf, onDownloadCV, analysisResult,
                 </div>
 
                 {isPdf && numPages && numPages > 1 && (
-                    <div style={{ padding: '0.75rem', background: 'var(--color-bg-secondary)', borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'center', gap: '1rem' }}>
-                        <button className="btn btn-sm" disabled={pageNumber <= 1} onClick={() => setPageNumber(p => p - 1)}>
+                    <div style={{ padding: '0.75rem', background: 'rgba(15, 23, 42, 0.4)', borderTop: '1px solid rgba(255, 255, 255, 0.1)', display: 'flex', justifyContent: 'center', gap: '1rem' }}>
+                        <button
+                            className="btn btn-sm"
+                            disabled={pageNumber <= 1}
+                            onClick={() => setPageNumber(p => p - 1)}
+                            style={{ background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.1)', color: 'var(--color-text-primary)', padding: '0.4rem 1rem', borderRadius: '8px' }}
+                        >
                             <ChevronLeft size={16} /> Previous
                         </button>
-                        <button className="btn btn-sm" disabled={pageNumber >= numPages} onClick={() => setPageNumber(p => p + 1)}>
+                        <button
+                            className="btn btn-sm"
+                            disabled={pageNumber >= numPages}
+                            onClick={() => setPageNumber(p => p + 1)}
+                            style={{ background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.1)', color: 'var(--color-text-primary)', padding: '0.4rem 1rem', borderRadius: '8px' }}
+                        >
                             Next <ChevronRight size={16} />
                         </button>
                     </div>
