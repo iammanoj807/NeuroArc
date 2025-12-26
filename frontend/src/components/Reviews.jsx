@@ -291,7 +291,7 @@ export default function Reviews() {
                                         <User size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
                                         <input
                                             type="text"
-                                            placeholder="John Doe"
+                                            placeholder="Enter your name"
                                             value={name}
                                             onChange={(e) => setName(e.target.value)}
                                             required
