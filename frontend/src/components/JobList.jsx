@@ -1,8 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MapPin, Calendar, DollarSign, Clock, Building, Search, ChevronLeft, ChevronRight, Briefcase, ChevronDown, SearchX } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 function JobList({ jobs, selectedJob, onSelectJob, cvSkills = [], postedFilter, setPostedFilter, hasSearched }) {
+    const [isSmallScreen, setIsSmallScreen] = useState(window.innerWidth < 400);
+
+    useEffect(() => {
+        const handleResize = () => setIsSmallScreen(window.innerWidth < 400);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     // Filter jobs based on posted date - HMR Trigger
     const getFilteredJobs = () => {
@@ -103,6 +110,7 @@ function JobList({ jobs, selectedJob, onSelectJob, cvSkills = [], postedFilter, 
     // Pagination
     const JOBS_PER_PAGE = 9;
     const [currentPage, setCurrentPage] = useState(1);
+    const maxPages = isSmallScreen ? 3 : 5;
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
     // Reset page when filter changes or jobs change
@@ -225,7 +233,7 @@ function JobList({ jobs, selectedJob, onSelectJob, cvSkills = [], postedFilter, 
                 variants={container}
                 initial="hidden"
                 animate="show"
-                style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1.5rem' }}
+                style={{ display: 'grid', gap: '1.5rem' }}
             >
                 {filteredJobs.length === 0 ? (
                     <div className="card no-hover" style={{ padding: '4rem 2rem', gridColumn: '1 / -1', maxWidth: '800px', margin: '0 auto', width: '100%', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
@@ -324,16 +332,20 @@ function JobList({ jobs, selectedJob, onSelectJob, cvSkills = [], postedFilter, 
                         </button>
 
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                            {/* Page Numbers */}
+                            {Array.from({ length: Math.min(maxPages, totalPages) }, (_, i) => {
                                 let pageNum;
-                                if (totalPages <= 5) {
+                                // Logic to always show "maxPages" centered around current page
+                                // But keeping first/last pages reachable
+                                // Generalized logic:
+                                if (totalPages <= maxPages) {
                                     pageNum = i + 1;
-                                } else if (validPage <= 3) {
+                                } else if (validPage <= Math.ceil(maxPages / 2)) {
                                     pageNum = i + 1;
-                                } else if (validPage >= totalPages - 2) {
-                                    pageNum = totalPages - 4 + i;
+                                } else if (validPage >= totalPages - Math.floor(maxPages / 2)) {
+                                    pageNum = totalPages - maxPages + 1 + i;
                                 } else {
-                                    pageNum = validPage - 2 + i;
+                                    pageNum = validPage - Math.floor(maxPages / 2) + i;
                                 }
 
                                 // Planet Textures Mapping (Mercury -> Neptune)
