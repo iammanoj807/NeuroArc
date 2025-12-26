@@ -18,6 +18,7 @@ import DocumentPreview from './components/DocumentPreview';
 import Background3D from './components/Background3D';
 import GenerationProgress from './components/GenerationProgress'; // Added this import based on the instruction's intent
 import AboutUs from './components/AboutUs';
+import ReviewsPage from './components/ReviewsPage';
 
 const API_BASE = '/api';
 
@@ -330,7 +331,19 @@ function App() {
             <div className="app">
                 <Background3D />
                 <main className="main-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '2rem' }}>
-                    <AboutUs onBack={handleBackToSearch} />
+                    <AboutUs onBack={handleBackToSearch} onNavigateToReviews={() => setCurrentStep('reviews')} />
+                </main>
+            </div>
+        );
+    }
+
+    // 7. Reviews View
+    if (currentStep === 'reviews') {
+        return (
+            <div className="app">
+                <Background3D />
+                <main className="main-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '2rem' }}>
+                    <ReviewsPage onBack={handleBackToSearch} />
                 </main>
             </div>
         );
@@ -653,13 +666,21 @@ function App() {
             {
                 currentStep !== 'preview' && <footer className="footer-responsive">
                     {/* Left: About Us */}
-                    <div className="footer-left">
+                    {/* Left: Footer Links */}
+                    <div className="footer-left" style={{ display: 'flex', gap: '1.5rem' }}>
                         <a
                             href="#"
                             onClick={(e) => { e.preventDefault(); setCurrentStep('about'); }}
                             style={{ color: 'var(--color-text-muted)', textDecoration: 'none', fontWeight: 600, opacity: 0.8 }}
                         >
                             About Us
+                        </a>
+                        <a
+                            href="#"
+                            onClick={(e) => { e.preventDefault(); setCurrentStep('reviews'); }}
+                            style={{ color: 'var(--color-text-muted)', textDecoration: 'none', fontWeight: 600, opacity: 0.8 }}
+                        >
+                            Reviews
                         </a>
                     </div>
 

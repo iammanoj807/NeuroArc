@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Import routers
-from routers import jobs, cv
+from routers import jobs, cv, reviews
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -61,6 +61,7 @@ app.add_middleware(
 # Include routers
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(cv.router, prefix="/api/cv", tags=["CV"])
+app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
 
 # Static Files & Frontend Serving
 # Check if frontend build exists (Production/Docker mode)

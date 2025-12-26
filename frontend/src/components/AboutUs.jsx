@@ -1,8 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Coffee, Heart } from 'lucide-react';
+import { ArrowLeft, Coffee, Heart, MessageSquare, Github } from 'lucide-react';
 
-const AboutUs = ({ onBack }) => {
+
+const AboutUs = ({ onBack, onNavigateToReviews }) => {
     return (
         <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -68,10 +69,47 @@ const AboutUs = ({ onBack }) => {
                     </p>
                 </div>
 
-                <p style={{ fontSize: '1.1rem', color: 'var(--color-text-muted)' }}>
+                <p style={{ fontSize: '1.1rem', color: 'var(--color-text-muted)', marginBottom: '2rem' }}>
                     However, running the website and high-performance servers that power these optimizations does come with a cost. I keep this running out of passion, but I am a student developer.
                 </p>
+
+                {/* Reviews CTA */}
+                <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+                    <button
+                        onClick={onNavigateToReviews}
+                        style={{
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            padding: '1rem 2rem',
+                            borderRadius: '16px',
+                            color: 'white',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.75rem',
+                            fontSize: '1rem',
+                            fontWeight: 600,
+                            transition: 'all 0.2s ease',
+                            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                            e.currentTarget.style.borderColor = 'var(--color-primary)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                        }}
+                    >
+                        <MessageSquare size={20} color="var(--color-primary)" />
+                        See Community Reviews
+                    </button>
+                </div>
             </div>
+
+
 
             <div style={{
                 borderTop: '1px solid var(--color-border)',
@@ -90,7 +128,7 @@ const AboutUs = ({ onBack }) => {
 
                 <div style={{ marginBottom: '1.5rem' }}>
                     <a href="https://github.com/iammanoj807" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center' }}>
-                        Connect on GitHub
+                        <Github size={20} /> Connect on GitHub
                     </a>
                 </div>
 

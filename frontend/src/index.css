@@ -361,9 +361,7 @@ body {
 }
 
 /* ===== Job specific improvements ===== */
-.job-card {
-  /* Inherit standard border */
-}
+
 
 .job-card.active {
   border-left-color: var(--color-primary);
