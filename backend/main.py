@@ -58,6 +58,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Trust X-Forwarded headers from proxies (Hugging Face Spaces)
+# This ensures the app knows it's being served over HTTPS
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
+
 # Include routers
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(cv.router, prefix="/api/cv", tags=["CV"])
