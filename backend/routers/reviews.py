@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from services import review_service
+import os
 
 router = APIRouter()
 
@@ -16,6 +17,9 @@ class ReviewResponse(BaseModel):
     rating: int
     comment: str
     date: str
+
+class DeleteRequest(BaseModel):
+    password: str
 
 @router.get("/", response_model=List[ReviewResponse])
 async def get_reviews():
@@ -38,12 +42,20 @@ async def submit_review(review: ReviewCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/{review_id}")
-async def delete_review(review_id: str):
-    """Delete a review (Admin only - handled by frontend key for MVP)."""
+async def delete_review(review_id: str, request: DeleteRequest):
+    """Delete a review (Admin only - password validated on backend)."""
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    
+    if not admin_password or request.password != admin_password:
+        raise HTTPException(status_code=401, detail="Password incorrect")
+    
     try:
         success = review_service.delete_review(review_id)
         if not success:
             raise HTTPException(status_code=404, detail="Review not found")
         return {"status": "success", "message": "Review deleted"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

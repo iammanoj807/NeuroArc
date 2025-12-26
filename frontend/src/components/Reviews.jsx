@@ -74,15 +74,11 @@ export default function Reviews() {
     const [deleteError, setDeleteError] = useState('');
 
     const confirmDelete = async () => {
-        const adminSecret = import.meta.env.VITE_ADMIN_PASSWORD;
-        if (deletePassword !== adminSecret) {
-            setDeleteError("Password incorrect");
-            return;
-        }
-
         try {
             const res = await fetch(`${API_BASE}/reviews/${deleteTargetId}`, {
                 method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: deletePassword })
             });
 
             if (res.ok) {
@@ -90,6 +86,8 @@ export default function Reviews() {
                 setDeleteTargetId(null);
                 setDeletePassword('');
                 setDeleteError('');
+            } else if (res.status === 401) {
+                setDeleteError("Password incorrect");
             } else {
                 setDeleteError("Failed to delete review");
             }
