@@ -1,17 +1,11 @@
----
-title: NeuroArc
-emoji: 🌍
-colorFrom: gray
-colorTo: blue
-sdk: docker
-app_port: 7860
-pinned: false
----
+<div align="center">
+  <img src="frontend/public/favicon.svg" alt="Logo" width="100" />
+  <h1>NeuroArc</h1>
+  <h3>AI-Powered Job Application Assistant</h3>
+  <p><strong>Search jobs → Match to your CV → Generate tailored CV</strong></p>
+</div>
 
-# NeuroArc <img src="frontend/public/favicon.svg" width="40" height="40" align="center" />
-
-> **AI-Powered Job Application Assistant**  
-> Search jobs → Match to your CV → Generate tailored CV
+---
 
 ## ✨ Features
 
