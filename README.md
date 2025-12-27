@@ -7,7 +7,11 @@
 
 ---
 
-## ✨ Features
+## ✨ Overview
+
+**NeuroArc** AI-powered job application assistant with LLM-based resume tailoring and intelligent job matching. Uses prompt engineering to generate ATS-optimized CVs and semantic scoring to rank job relevance beyond keyword matching.
+
+## 🚀 Features
 
 - **📄 CV Parsing** - Upload PDF/DOCX and automatically extract skills, experience, and contact info.
 - **🔍 Smart Job Search** - Search real jobs from Reed API (UK's largest job board).
