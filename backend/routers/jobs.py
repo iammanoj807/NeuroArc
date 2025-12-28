@@ -27,7 +27,7 @@ async def search_jobs_get(
     location: Optional[str] = Query(None),
     country: str = Query("gb"),
     page: int = Query(1, ge=1),
-    limit: int = Query(100, ge=1, le=200),
+    limit: int = Query(100, ge=1, le=400),
     fullTime: Optional[bool] = Query(None),
     partTime: Optional[bool] = Query(None),
     permanent: Optional[bool] = Query(None),

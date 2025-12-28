@@ -74,7 +74,7 @@ function App() {
             const params = new URLSearchParams({
                 q: query, // Can be empty string now
                 country: country,
-                limit: '200'
+                limit: '400'
             });
 
             if (location) {
