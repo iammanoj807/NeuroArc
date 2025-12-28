@@ -87,7 +87,7 @@ body {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100%;
+  width: 100vw;
   height: 100vh;
   z-index: -1;
   pointer-events: none;
@@ -103,8 +103,6 @@ body {
   /* Mobile viewport fix */
   position: relative;
   z-index: 1;
-  overflow-x: hidden;
-  /* Ensure app container clips overflow */
 }
 
 /* Glass Header */
@@ -112,18 +110,10 @@ body {
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--glass-border);
-  padding: 2rem 3rem;
-  /* Updated to match premium design */
+  padding: 1.25rem 2rem;
   position: sticky;
   top: 0;
   z-index: 100;
-  width: 100%;
-  /* Ensure it doesn't overflow parent */
-  box-sizing: border-box;
-  /* Strict sizing */
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
 .header-content {
@@ -812,12 +802,5 @@ body {
     height: 30px !important;
     display: flex !important;
     justify-content: center !important;
-  }
-}
-
-/* Responsive Main Container */
-@media (max-width: 768px) {
-  .main {
-    padding: 2rem 1rem;
   }
 }

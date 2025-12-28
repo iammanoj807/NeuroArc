@@ -354,7 +354,14 @@ function App() {
             <Background3D />
 
             {/* Header */}
-            <header className="header">
+            <header style={{
+                padding: '2rem 3rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                position: 'relative',
+                zIndex: 10
+            }}>
                 <div onClick={handleReset} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '1rem' }}>
                     <Brain size={64} color="var(--color-primary)" />
                     <div>
