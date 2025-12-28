@@ -1,14 +1,3 @@
----
-title: NeuroArc
-emoji: 🌍
-colorFrom: gray
-colorTo: blue
-sdk: docker
-app_port: 7860
-pinned: false
-short_description: Resume optimization and semantic job scoring using LLMs.
----
-
 <div align="center">
   <img src="frontend/public/favicon.svg" alt="Logo" width="100" />
   <h1>NeuroArc</h1>
