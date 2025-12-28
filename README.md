@@ -1,3 +1,13 @@
+---
+title: NeuroArc
+emoji: 🚀
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 <div align="center">
   <img src="frontend/public/favicon.svg" alt="Logo" width="100" />
   <h1>NeuroArc</h1>
