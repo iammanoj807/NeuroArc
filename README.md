@@ -6,14 +6,23 @@ colorTo: blue
 sdk: docker
 app_port: 7860
 pinned: false
+short_description: Resume optimization and semantic job scoring using LLMs.
 ---
 
-# NeuroArc <img src="frontend/public/favicon.svg" width="40" height="40" align="center" />
+<div align="center">
+  <img src="frontend/public/favicon.svg" alt="Logo" width="100" />
+  <h1>NeuroArc</h1>
+  <h3>AI-Powered Job Application Assistant</h3>
+  <p><strong>Search jobs → Match to your CV → Generate tailored CV</strong></p>
+</div>
 
-> **AI-Powered Job Application Assistant**  
-> Search jobs → Match to your CV → Generate tailored CV
+---
 
-## ✨ Features
+## ✨ Overview
+
+**NeuroArc** AI-powered job application assistant with LLM-based resume tailoring and intelligent job matching. Uses prompt engineering to generate ATS-optimized CVs and semantic scoring to rank job relevance beyond keyword matching.
+
+## 🚀 Features
 
 - **📄 CV Parsing** - Upload PDF/DOCX and automatically extract skills, experience, and contact info.
 - **🔍 Smart Job Search** - Search real jobs from Reed API (UK's largest job board).
