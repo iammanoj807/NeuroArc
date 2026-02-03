@@ -386,26 +386,6 @@ function App() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-
-
-                    <div className="tooltip-container">
-                        <a href="https://www.buymeacoffee.com/manojthapa" target="_blank" rel="noopener noreferrer" className="hide-mobile">
-                            <img
-                                src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png"
-                                alt="Buy Me A Coffee"
-                                style={{ height: '50px', width: 'auto' }}
-                            />
-                        </a>
-
-                        <a href="https://www.buymeacoffee.com/manojthapa" target="_blank" rel="noopener noreferrer" className="show-mobile">
-                            <img
-                                src="/bmc-icon.png"
-                                alt="Buy Me A Coffee"
-                                style={{ height: '36px', width: 'auto', borderRadius: '50%', boxShadow: '0 4px 12px rgba(255, 221, 0, 0.3)' }}
-                            />
-                        </a>
-                        <span className="tooltip-text">Support Manoj</span>
-                    </div>
                 </div>
             </header>
 
