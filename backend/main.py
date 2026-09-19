@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Import routers
-from routers import jobs, cv, reviews
+from routers import jobs, cv
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -66,7 +66,6 @@ app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 # Include routers
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(cv.router, prefix="/api/cv", tags=["CV"])
-app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
 
 # Static Files & Frontend Serving
 # Check if frontend build exists (Production/Docker mode)
@@ -111,13 +110,13 @@ else:
 @app.get("/health")
 async def health_check():
     """Health check endpoint with dependency status"""
-    github_token = bool(os.getenv("GITHUB_TOKEN", ""))
+    groq_api_key = bool(os.getenv("GROQ_API_KEY", ""))
     reed_api_key = bool(os.getenv("REED_API_KEY", ""))
     
     return {
         "status": "healthy",
         "dependencies": {
-            "ai_service": "available" if github_token else "unavailable (no GITHUB_TOKEN)",
+            "ai_service": "available" if groq_api_key else "unavailable (no GROQ_API_KEY)",
             "job_search": "available" if reed_api_key else "mock mode (no REED_API_KEY)"
         }
     }

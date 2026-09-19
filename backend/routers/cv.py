@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from services.cv_parser import cv_parser
 from services.ai_service import ai_service
-from services.pdf_generator import pdf_generator
+from services.pdf_generator import pdf_generator, _to_pdf_safe
 import hashlib
 import time
 import logging
@@ -224,10 +224,14 @@ async def generate_cv_pdf(request: CVGenerateRequest):
     filename = f"CV_{safe_company}_{safe_title}.pdf".replace(" ", "_")
     logger.info(f"PDF generated successfully: {filename}")
     
-    # Extract improvement metrics
+    # Extract improvement metrics. Header values must be latin-1 encodable,
+    # and model output can contain characters like non-breaking hyphens.
     imp_report = result["data"].get("improvement_report", {})
     new_score = imp_report.get("new_score", "")
-    skills_added = ",".join(imp_report.get("skills_added", []))
+    skills_added = ",".join(
+        _to_pdf_safe(skill).encode("ascii", "ignore").decode().strip()
+        for skill in imp_report.get("skills_added", [])
+    )
     
     headers = {
         "Content-Disposition": f"attachment; filename={filename}",

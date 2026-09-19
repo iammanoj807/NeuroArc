@@ -9,26 +9,26 @@ pinned: false
 ---
 
 <div align="center">
-  <img src="frontend/public/favicon.svg" alt="Logo" width="100" />
+  <img src="frontend/public/favicon.svg" alt="Logo" width="80" />
   <h1>NeuroArc</h1>
   <h3>AI-Powered Job Application Assistant</h3>
-  <p><strong>Search jobs → Match to your CV → Generate tailored CV</strong></p>
+  <p><strong>Search jobs → Match to your CV → Generate a tailored CV</strong></p>
 </div>
 
 ---
 
 ## ✨ Overview
 
-**NeuroArc** AI-powered job application assistant with LLM-based resume tailoring and intelligent job matching. Uses prompt engineering to generate ATS-optimized CVs and semantic scoring to rank job relevance beyond keyword matching.
+**NeuroArc** is an AI-powered job application assistant with LLM-based resume tailoring and intelligent job matching. It uses prompt engineering to generate ATS-optimized CVs and semantic scoring to rank job relevance beyond keyword matching.
 
 ## 🚀 Features
 
 - **📄 CV Parsing** - Upload PDF/DOCX and automatically extract skills, experience, and contact info.
-- **🔍 Smart Job Search** - Search real jobs from Reed API (UK's largest job board).
-- **🎯 Match Scoring** - Jobs ranked by how well they match your CV skills.
-- **✍️ AI-Tailored CV** - Generate CVs optimized on the basis of ATS standards.
-
-- **📥 PDF Export** - Download professional documents ready to submit.
+- **🔍 Smart Job Search** - Search real jobs from the Reed API (UK's largest job board), with job-type and date filters.
+- **🎯 Match Scoring** - See an ATS match score, matching skills, missing skills, and recommended projects for any job.
+- **✍️ AI-Tailored CV** - Generate a CV optimized for the job, following ATS standards.
+- **📥 PDF Export** - Preview and download a professional PDF ready to submit.
+- **🖥️ Clean, Responsive UI** - Professional interface that works on desktop and mobile, with automatic light/dark mode.
 
 ---
 
@@ -36,11 +36,11 @@ pinned: false
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 18, Vite, Three.js (React Three Fiber) |
+| Frontend | React 18, Vite, Framer Motion, Lucide icons |
 | Backend | FastAPI, Python 3.11+ |
-| AI | GPT-4o (GitHub Models) |
-| CV Parsing | PyMuPDF, python-docx |
-| PDF Generation | ReportLab |
+| AI | Groq API — `openai/gpt-oss-120b` (auto-fallback to `openai/gpt-oss-20b` and `qwen/qwen3.8-27b`) |
+| CV Parsing | PyMuPDF, python-docx, Tesseract OCR |
+| PDF Generation | ReportLab, react-pdf (preview) |
 | Job Data | Reed UK API |
 
 ---
@@ -49,21 +49,21 @@ pinned: false
 
 ### Prerequisites
 
-- Python 3.10+ 
+- Python 3.10+
 - Node.js 18+
 
 ### Installation
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/iammanoj807/cortexcv.git
-   cd cortexcv
+   git clone https://github.com/iammanoj807/NeuroArc.git
+   cd NeuroArc
    ```
 
 2. **Configure API Keys**
-   You simply need to provide these API keys in `backend/.env`:
-   - `GITHUB_TOKEN`
-   - `REED_API_KEY`
+   Copy `backend/.env.example` to `backend/.env` and fill in:
+   - `GROQ_API_KEY` - get a free key at [console.groq.com/keys](https://console.groq.com/keys)
+   - `REED_API_KEY` - get a key at [reed.co.uk/developers](https://www.reed.co.uk/developers)
 
 3. **Start the application**
    ```bash
@@ -74,6 +74,17 @@ pinned: false
 4. **Open in browser**
    - Frontend: http://localhost:5173
    - API Docs: http://localhost:8000/docs
+
+---
+
+## ☁️ Deploying to Hugging Face Spaces
+
+The repo includes a `Dockerfile` that builds the frontend and serves it from the FastAPI backend on port `7860`.
+
+Add these as **Secrets** in your Space settings (never commit them):
+
+- `GROQ_API_KEY`
+- `REED_API_KEY`
 
 ---
 

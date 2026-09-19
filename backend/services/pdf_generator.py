@@ -11,6 +11,25 @@ from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY, TA_RIGHT
 import io
 from typing import Optional
 
+# The built-in Times fonts can't render some Unicode characters that LLMs emit
+# (e.g. non-breaking hyphens), which show up as black boxes in the PDF
+_PDF_CHAR_MAP = str.maketrans({
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2043": "-", "\u2212": "-",
+    "\u00a0": " ", "\u2002": " ", "\u2003": " ", "\u2007": " ", "\u2009": " ", "\u200a": " ", "\u202f": " ",
+    "\u200b": "", "\u200c": "", "\u200d": "", "\ufeff": "",
+    "\u2192": "->", "\u2190": "<-", "\u2264": "<=", "\u2265": ">=", "\u2248": "~",
+})
+
+def _to_pdf_safe(value):
+    """Recursively replace characters the PDF fonts can't render"""
+    if isinstance(value, str):
+        return value.translate(_PDF_CHAR_MAP)
+    if isinstance(value, list):
+        return [_to_pdf_safe(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _to_pdf_safe(v) for k, v in value.items()}
+    return value
+
 class HorizontalLine(Flowable):
     """Draws a horizontal line"""
     def __init__(self, width=450):
@@ -92,6 +111,7 @@ class PDFGenerator:
         Generate a professional CV PDF for ANY domain/industry.
         Adapts section titles and structure based on content.
         """
+        data = _to_pdf_safe(data)
         buffer = io.BytesIO()
         
         doc = SimpleDocTemplate(

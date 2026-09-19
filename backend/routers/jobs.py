@@ -1,7 +1,7 @@
 """
 Jobs Router - API endpoints for job search
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from services.job_service import job_service
 
@@ -67,3 +67,12 @@ async def get_supported_countries():
             {"code": "us", "name": "United States", "flag": "🇺🇸"}
         ]
     }
+
+# Registered after the fixed paths above so "/countries" isn't captured as a job ID
+@router.get("/{job_id}")
+async def get_job(job_id: str):
+    """Get a job's full details, including the complete description"""
+    result = await job_service.get_job_details(job_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=result.get("error", "Could not fetch job details"))
+    return result

@@ -76,6 +76,13 @@ echo ""
 echo -e "${BLUE}📦 Setting up Backend...${NC}"
 cd "$SCRIPT_DIR/backend"
 
+# Recreate the virtual environment if it was created at another path
+# (e.g. the project folder was moved/renamed) - its scripts would point to the old location
+if [ -d "venv" ] && ! grep -qF "$SCRIPT_DIR/backend/venv" venv/bin/activate 2>/dev/null; then
+    echo -e "${YELLOW}⚠️  Virtual environment was created at a different path. Recreating...${NC}"
+    rm -rf venv
+fi
+
 # Create virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
     echo "  Creating Python virtual environment..."
@@ -87,7 +94,7 @@ source venv/bin/activate
 
 # Install/update dependencies
 echo "  Installing Python dependencies..."
-pip install -r requirements.txt --quiet
+python -m pip install -r requirements.txt --quiet
 
 # Copy .env.example to .env if .env doesn't exist
 if [ ! -f ".env" ]; then
@@ -98,14 +105,14 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
-# Check if GITHUB_TOKEN is set
-if grep -q "your_github_token_here" .env 2>/dev/null; then
-    echo -e "${YELLOW}⚠️  GITHUB_TOKEN not configured - AI features will be limited${NC}"
+# Check if GROQ_API_KEY is set
+if ! grep -q "^GROQ_API_KEY=gsk_" .env 2>/dev/null; then
+    echo -e "${YELLOW}⚠️  GROQ_API_KEY not configured - AI features will be limited${NC}"
 fi
 
 # Start backend with auto-reload
 echo -e "${GREEN}✅ Starting FastAPI Backend (http://localhost:$BACKEND_PORT)${NC}"
-uvicorn main:app --reload --host 0.0.0.0 --port $BACKEND_PORT &
+python -m uvicorn main:app --reload --host 0.0.0.0 --port $BACKEND_PORT &
 BACKEND_PID=$!
 
 # Wait a moment for backend to start

@@ -1,6 +1,10 @@
-import { useState, useCallback, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, ArrowLeft, ArrowRight, Wrench, Briefcase, Search, Coffee, Trash2, X, BrainCircuit, FileSearch, Sparkles, ScanLine } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { useState, useCallback } from 'react';
+import { UploadCloud, FileText, CheckCircle2, AlertCircle, AlertTriangle, ArrowLeft, Lightbulb, Compass, Search, Trash2, X, Sparkles, ScanLine, RefreshCw, ShieldCheck } from 'lucide-react';
+import GenerationProgress from './GenerationProgress';
+import ErrorMessage from './ErrorMessage';
+
+const RING_RADIUS = 66;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 function CVAnalysis({ job, onAnalyze, onNext, onBack, upstreamError }) {
     const [isDragging, setIsDragging] = useState(false);
@@ -9,13 +13,6 @@ function CVAnalysis({ job, onAnalyze, onNext, onBack, upstreamError }) {
     const [result, setResult] = useState(null);
     const [error, setError] = useState(null);
     const [dismissedError, setDismissedError] = useState(false);
-    const [isSmallScreen, setIsSmallScreen] = useState(window.innerWidth < 1020);
-
-    useEffect(() => {
-        const handleResize = () => setIsSmallScreen(window.innerWidth < 1020);
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
 
     // Combine local and upstream errors (unless dismissed)
     const displayError = dismissedError ? null : (error || upstreamError);
@@ -86,174 +83,88 @@ function CVAnalysis({ job, onAnalyze, onNext, onBack, upstreamError }) {
         }
     };
 
+    const errorAlert = displayError && (
+        <div className="alert alert-error" role="alert" style={{ marginBottom: '1.25rem' }}>
+            <AlertCircle size={18} />
+            <div className="alert-body">
+                <ErrorMessage message={displayError} />
+            </div>
+            <button
+                className="alert-close"
+                onClick={() => { setError(null); setDismissedError(true); }}
+                aria-label="Dismiss"
+            >
+                <X size={16} />
+            </button>
+        </div>
+    );
+
+    const backButton = (
+        <div className="page-toolbar">
+            <button className="back-link" onClick={onBack}>
+                <ArrowLeft size={16} /> Back to jobs
+            </button>
+        </div>
+    );
+
     if (result) {
+        const tone = result.score >= 70 ? 'success' : (result.score >= 50 ? 'warning' : 'danger');
+        const match = result.domain_match === 'complete_mismatch'
+            ? { tone: 'danger', label: 'Field mismatch', Icon: AlertCircle }
+            : result.domain_match === 'weak_match'
+                ? { tone: 'warning', label: 'Partial match', Icon: AlertTriangle }
+                : { tone: 'success', label: 'Strong match', Icon: CheckCircle2 };
+
         return (
             <div className="analysis-results fade-in">
-                <div className="results-navigation" style={{ marginBottom: '2rem' }}>
-                    <button
-                        className="btn btn-ghost"
-                        onClick={onBack}
-                        style={{
-                            color: 'var(--color-text-muted)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            padding: '0.5rem 1rem',
-                            borderRadius: '20px',
-                            fontSize: '0.9rem',
-                            width: 'fit-content'
-                        }}
-                    >
-                        <ArrowLeft size={18} /> Back to Search
-                    </button>
-                </div>
+                {backButton}
 
                 {/* Show upstream error (e.g. optimization failed) */}
-                {displayError && result && (
-                    <div className="alert alert-error" style={{ marginBottom: '2rem', textAlign: 'left', display: 'flex', alignItems: 'flex-start', gap: '0.75rem', position: 'relative' }}>
-                        <AlertCircle size={20} style={{ flexShrink: 0, marginTop: '2px' }} />
-                        <div style={{ fontSize: '0.95rem', lineHeight: 1.5, flex: 1 }}>
-                            {displayError.includes('buymeacoffee') ? (
-                                <span>
-                                    Server is busy due to high demand. Please help keep the servers running — {' '}
-                                    <a
-                                        href="https://buymeacoffee.com/manojthapa"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        style={{ color: 'var(--color-warning)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
-                                    >
-                                        <Coffee size={16} /> Buy me a coffee
-                                    </a>
-                                </span>
-                            ) : (
-                                displayError
-                            )}
-                        </div>
-                        <button
-                            onClick={() => setDismissedError(true)}
-                            style={{
-                                background: 'transparent',
-                                border: 'none',
-                                color: 'inherit',
-                                cursor: 'pointer',
-                                padding: '0.25rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                opacity: 0.7,
-                                transition: 'opacity 0.2s'
-                            }}
-                            onMouseEnter={(e) => e.target.style.opacity = 1}
-                            onMouseLeave={(e) => e.target.style.opacity = 0.7}
-                        >
-                            <X size={18} />
-                        </button>
-                    </div>
-                )}
+                {errorAlert}
 
                 {/* Score & Header Section */}
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: isSmallScreen ? '1fr' : 'minmax(250px, 1fr) 2fr',
-                    gap: '2rem',
-                    marginBottom: '2rem',
-                    alignItems: 'stretch'
-                }}>
+                <div className="analysis-top">
                     {/* Score Card */}
-                    <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '2.5rem' }}>
-                        <div className="score-circle-container" style={{ position: 'relative', width: '180px', height: '180px', marginBottom: '1.5rem' }}>
-                            {/* Glowing Background */}
-                            <div style={{
-                                position: 'absolute',
-                                inset: 0,
-                                borderRadius: '50%',
-                                background: `radial-gradient(circle at center, ${result.score >= 70 ? 'var(--color-success)' : (result.score >= 50 ? 'var(--color-warning)' : 'var(--color-error)')} 0%, transparent 70%)`,
-                                opacity: 0.15,
-                                filter: 'blur(20px)'
-                            }}></div>
-
-                            {/* SVG Progress Circle */}
-                            <svg width="180" height="180" viewBox="0 0 180 180" style={{ transform: 'rotate(-90deg)' }}>
+                    <div className="card score-card">
+                        <div className="score-ring">
+                            <svg width="100%" height="100%" viewBox="0 0 148 148">
+                                <circle cx="74" cy="74" r={RING_RADIUS} fill="none" strokeWidth="10" className="score-ring-track" />
                                 <circle
-                                    cx="90"
-                                    cy="90"
-                                    r="80"
+                                    cx="74"
+                                    cy="74"
+                                    r={RING_RADIUS}
                                     fill="none"
-                                    stroke="var(--color-bg-secondary)"
                                     strokeWidth="10"
-                                />
-                                <circle
-                                    cx="90"
-                                    cy="90"
-                                    r="80"
-                                    fill="none"
-                                    stroke={result.score >= 70 ? 'var(--color-success)' : (result.score >= 50 ? 'var(--color-warning)' : 'var(--color-error)')}
-                                    strokeWidth="10"
-                                    strokeDasharray={502}
-                                    strokeDashoffset={502 - (502 * result.score) / 100}
                                     strokeLinecap="round"
-                                    style={{ transition: 'stroke-dashoffset 1s ease-out' }}
+                                    className={`score-ring-value tone-${tone}`}
+                                    strokeDasharray={RING_CIRCUMFERENCE}
+                                    strokeDashoffset={RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * result.score) / 100}
                                 />
                             </svg>
-
-                            <div style={{
-                                position: 'absolute',
-                                inset: 0,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                flexDirection: 'column'
-                            }}>
-                                <span style={{ fontSize: '3.5rem', fontWeight: 800, lineHeight: 1, letterSpacing: '-0.03em' }}>{result.score}%</span>
-                                <span style={{ fontSize: '1rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '0.25rem' }}>Match</span>
+                            <div className="score-ring-label">
+                                <span className="score-number">{result.score}%</span>
+                                <span className="score-caption">Match</span>
                             </div>
                         </div>
+                        <p className="score-hint">ATS match score for this role</p>
                     </div>
 
                     {/* Header Details Card */}
-                    <div className="card" style={{ display: 'flex', flexDirection: 'column', padding: '2rem' }}>
-                        <div style={{ marginBottom: 'auto' }}>
-                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
-                                <div style={{
-                                    padding: '0.25rem 0.75rem',
-                                    borderRadius: '20px',
-                                    background: result.domain_match === 'complete_mismatch'
-                                        ? 'rgba(239, 68, 68, 0.1)'
-                                        : result.domain_match === 'weak_match'
-                                            ? 'rgba(245, 158, 11, 0.1)'
-                                            : 'rgba(16, 185, 129, 0.1)',
-                                    color: result.domain_match === 'complete_mismatch'
-                                        ? 'var(--color-error)'
-                                        : result.domain_match === 'weak_match'
-                                            ? 'var(--color-warning)'
-                                            : 'var(--color-success)',
-                                    fontSize: '0.85rem',
-                                    fontWeight: 600,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.4rem',
-                                    border: `1px solid ${result.domain_match === 'complete_mismatch'
-                                        ? 'rgba(239, 68, 68, 0.2)'
-                                        : result.domain_match === 'weak_match'
-                                            ? 'rgba(245, 158, 11, 0.2)'
-                                            : 'rgba(16, 185, 129, 0.2)'}`
-                                }}>
-                                    {result.domain_match === 'complete_mismatch' ? <AlertCircle size={14} /> : result.domain_match === 'weak_match' ? <AlertCircle size={14} /> : <CheckCircle size={14} />}
-                                    {result.domain_match === 'complete_mismatch' ? 'Field Mismatch' : result.domain_match === 'weak_match' ? 'Partial Match' : 'Strong Match'}
-                                </div>
-                            </div>
-                            <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem', lineHeight: 1.2 }}>{job.title}</h2>
-                            <p style={{ fontSize: '1.1rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                at <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{job.company}</span>
-                            </p>
+                    <div className="card role-card">
+                        <span className={`badge badge-${match.tone}`}>
+                            <match.Icon size={14} /> {match.label}
+                        </span>
+                        <div>
+                            <h2 className="role-title">{job.title}</h2>
+                            <p className="role-company">{job.company}{job.location ? ` · ${job.location}` : ''}</p>
                         </div>
-                        <p style={{ fontSize: '1rem', lineHeight: 1.6, color: 'var(--color-text-secondary)', marginTop: '1.5rem', padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                        <p className="role-summary">
                             {result.domain_match === 'complete_mismatch' ? (
                                 <>Your background is in a different field. Optimizing would be difficult without fabricating experience, but we can help you transition.</>
                             ) : result.domain_match === 'weak_match' ? (
                                 <>You have transferable skills but need more specific experience. Focus on projects to bridge the gap.</>
                             ) : result.score >= 80 ? (
-                                <>Excellent fit! Your profile closely matches the requirements. Minor tweaks can make you standout even more.</>
+                                <>Excellent fit. Your profile closely matches the requirements, and minor tweaks can make you stand out even more.</>
                             ) : (
                                 <>Good foundation. Adding specific keywords and project experience will significantly boost your match score.</>
                             )}
@@ -261,58 +172,41 @@ function CVAnalysis({ job, onAnalyze, onNext, onBack, upstreamError }) {
                     </div>
                 </div>
 
-                <div className="skills-grid" style={{ display: 'grid', gridTemplateColumns: isSmallScreen ? '1fr' : '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
+                <div className="two-col">
                     {/* Good Matches */}
-                    <div className="card" style={{ padding: '2rem' }}>
-                        <h3 style={{ color: 'var(--color-success)', display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                            <CheckCircle size={24} /> Good Matches
+                    <div className="card">
+                        <h3 className="panel-title">
+                            <CheckCircle2 size={18} className="tone-success" /> Matching skills
+                            <span className="count">{result.matching_skills?.length || 0}</span>
                         </h3>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+                        <div className="tag-list">
                             {result.matching_skills?.length > 0 ? (
                                 result.matching_skills.map((skill, i) => (
-                                    <span key={i} style={{
-                                        padding: '0.5rem 1rem',
-                                        background: 'rgba(16, 185, 129, 0.1)',
-                                        border: '1px solid rgba(16, 185, 129, 0.2)',
-                                        borderRadius: '30px',
-                                        color: 'var(--color-text-primary)',
-                                        fontSize: '0.95rem',
-                                        fontWeight: 500
-                                    }}>
-                                        {skill}
-                                    </span>
+                                    <span key={i} className="tag tag-success">{skill}</span>
                                 ))
                             ) : (
-                                <span style={{ fontStyle: 'italic', color: 'var(--color-text-muted)' }}>No direct matches found.</span>
+                                <span className="panel-empty">No direct matches found.</span>
                             )}
                         </div>
                     </div>
 
                     {/* Missing / To Improve */}
-                    <div className="card" style={{ padding: '2rem' }}>
-                        <h3 style={{ color: 'var(--color-error)', display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                            <AlertCircle size={24} /> Missing / To Improve
+                    <div className="card">
+                        <h3 className="panel-title">
+                            <AlertCircle size={18} className="tone-danger" /> Missing or to improve
+                            <span className="count">{result.missing_skills?.length || 0}</span>
                         </h3>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+                        <div className="tag-list">
                             {result.missing_skills?.length > 0 ? (
                                 result.missing_skills.map((skill, i) => (
-                                    <span key={i} style={{
-                                        padding: '0.5rem 1rem',
-                                        background: 'rgba(239, 68, 68, 0.05)',
-                                        border: '1px solid rgba(239, 68, 68, 0.2)',
-                                        borderRadius: '30px',
-                                        color: 'var(--color-text-secondary)',
-                                        fontSize: '0.95rem'
-                                    }}>
-                                        {skill}
-                                    </span>
+                                    <span key={i} className="tag tag-danger">{skill}</span>
                                 ))
                             ) : result.score < 80 ? (
-                                <span style={{ fontStyle: 'italic', color: 'var(--color-warning)' }}>
-                                    No specific missing keywords, but experience gaps detected. Check <strong>Recommendations</strong> below.
+                                <span className="panel-empty warning">
+                                    No specific missing keywords, but experience gaps were detected. See the recommendations below.
                                 </span>
                             ) : (
-                                <span style={{ fontStyle: 'italic', color: 'var(--color-text-muted)' }}>None! Great job.</span>
+                                <span className="panel-empty">Nothing missing. Great job.</span>
                             )}
                         </div>
                     </div>
@@ -320,76 +214,60 @@ function CVAnalysis({ job, onAnalyze, onNext, onBack, upstreamError }) {
 
                 {/* Recommendations */}
                 {result.project_recommendations && result.project_recommendations.length > 0 && result.domain_match !== 'complete_mismatch' && (
-                    <div className="card" style={{ padding: '2rem', background: 'linear-gradient(to right, rgba(245, 158, 11, 0.05), transparent)' }}>
-                        <h3 style={{ color: 'var(--color-warning)', display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                            <Wrench size={24} />
-                            {['Software Engineering', 'Data Science/AI'].includes(result.detected_industry) ? 'Recommended Projects' : 'Recommended Experience'}
+                    <div className="card">
+                        <h3 className="panel-title" style={{ marginBottom: '0.25rem' }}>
+                            <Lightbulb size={18} className="tone-warning" />
+                            {['Software Engineering', 'Data Science/AI'].includes(result.detected_industry) ? 'Recommended projects' : 'Recommended experience'}
                         </h3>
-                        <p style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem', maxWidth: '800px' }}>
-                            Strengthen your profile by gaining experience in these specific areas:
+                        <p className="card-subtitle" style={{ marginBottom: '1rem' }}>
+                            Strengthen your profile by gaining experience in these specific areas.
                         </p>
-                        <div style={{ display: 'grid', gap: '1rem' }}>
+                        <ol className="rec-list">
                             {result.project_recommendations.map((project, i) => (
-                                <div key={i} style={{
-                                    padding: '1rem 1.5rem',
-                                    background: 'rgba(255, 255, 255, 0.03)',
-                                    borderRadius: '12px',
-                                    border: '1px solid var(--glass-border)',
-                                    display: 'flex',
-                                    alignItems: 'baseline',
-                                    gap: '1rem'
-                                }}>
-                                    <span style={{ color: 'var(--color-warning)', fontWeight: 800 }}>{i + 1}.</span>
-                                    <span style={{ color: 'var(--color-text-primary)' }}>{project}</span>
-                                </div>
+                                <li key={i} className="rec-item">
+                                    <span className="rec-index">{String(i + 1).padStart(2, '0')}</span>
+                                    <span>{project}</span>
+                                </li>
                             ))}
-                        </div>
+                        </ol>
                     </div>
                 )}
 
                 {/* Transition Plan (Mismatch) */}
                 {result.domain_match === 'complete_mismatch' && (
-                    <div className="card" style={{ marginTop: '2rem', padding: '2.5rem' }}>
-                        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                            <div style={{ width: '56px', height: '56px', background: 'rgba(45, 212, 191, 0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem', color: 'var(--color-primary)' }}>
-                                <Briefcase size={28} />
-                            </div>
-                            <h3 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>Transition Roadmap</h3>
-                            <p style={{ color: 'var(--color-text-secondary)' }}>Steps to break into this field</p>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: isSmallScreen ? '1fr' : 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem' }}>
-                            {/* Roadmap Cards */}
+                    <div className="card">
+                        <h3 className="panel-title" style={{ marginBottom: '0.25rem' }}>
+                            <Compass size={18} /> Transition roadmap
+                        </h3>
+                        <p className="card-subtitle" style={{ marginBottom: '1rem' }}>Steps to break into this field</p>
+                        <div className="roadmap-grid">
                             {[
-                                { title: 'Take Courses', desc: `Learn ${result.missing_skills?.slice(0, 2).join(', ')} online.` },
-                                { title: 'Get Certified', desc: `Obtain certifications relevant to ${job.title}.` },
-                                { title: 'Build Projects', desc: 'Create a portfolio to show hands-on skills.' },
-                                { title: 'Start Junior', desc: 'Look for entry-level roles with training.' }
+                                { title: 'Take courses', desc: `Learn ${result.missing_skills?.slice(0, 2).join(', ')} online.` },
+                                { title: 'Get certified', desc: `Obtain certifications relevant to ${job.title}.` },
+                                { title: 'Build projects', desc: 'Create a portfolio to show hands-on skills.' },
+                                { title: 'Start junior', desc: 'Look for entry-level roles with training.' }
                             ].map((item, idx) => (
-                                <div key={idx} className="card" style={{ padding: '1.5rem', background: 'rgba(255,255,255,0.02)' }}>
-                                    <div style={{ width: '28px', height: '28px', background: 'var(--color-primary)', borderRadius: '6px', color: '#050b14', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', marginBottom: '1rem' }}>{idx + 1}</div>
-                                    <h4 style={{ marginBottom: '0.5rem' }}>{item.title}</h4>
-                                    <p style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>{item.desc}</p>
+                                <div key={idx} className="roadmap-item">
+                                    <span className="step-index">{idx + 1}</span>
+                                    <h4>{item.title}</h4>
+                                    <p>{item.desc}</p>
                                 </div>
                             ))}
                         </div>
                     </div>
                 )}
 
-                <div className="actions" style={{ marginTop: '3rem', display: 'flex', justifyContent: 'center', gap: '1rem', borderTop: '1px solid var(--color-border)', paddingTop: '2rem' }}>
-                    <button className="btn btn-secondary" style={{ background: 'rgba(10, 22, 37, 0.8)', border: '1px solid rgba(0, 229, 255, 0.2)', borderRadius: '12px' }} onClick={() => { setFile(null); setResult(null); }}>
-                        Upload Different CV
+                <div className="actions-bar">
+                    <button className="btn btn-secondary" onClick={() => { setFile(null); setResult(null); }}>
+                        <RefreshCw size={16} /> Upload a different CV
                     </button>
                     {result.domain_match !== 'complete_mismatch' ? (
-                        <button
-                            className="btn btn-secondary btn-lg no-hover-shadow"
-                            onClick={onNext}
-                            style={{ background: 'rgba(10, 22, 37, 0.8)', border: '1px solid rgba(0, 229, 255, 0.2)', borderRadius: '12px', boxShadow: 'none' }}
-                        >
-                            Optimize CV
+                        <button className="btn btn-primary" onClick={onNext}>
+                            <Sparkles size={16} /> Generate tailored CV
                         </button>
                     ) : (
-                        <button className="btn btn-secondary" style={{ background: 'rgba(10, 22, 37, 0.8)', border: '1px solid rgba(0, 229, 255, 0.2)', borderRadius: '12px' }} onClick={onBack}>
-                            Find a Better Match
+                        <button className="btn btn-primary" onClick={onBack}>
+                            <Search size={16} /> Find a better match
                         </button>
                     )}
                 </div>
@@ -397,165 +275,82 @@ function CVAnalysis({ job, onAnalyze, onNext, onBack, upstreamError }) {
         );
     }
 
-    // Floating "Analyzing" State
+    // "Analyzing" State
     if (analyzing) {
         return (
-            <div className="loading" style={{ textAlign: 'center', padding: '0', perspective: '1000px', marginTop: '3rem', minHeight: '50vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-                <div style={{ position: 'relative' }}>
-                    <motion.div
-                        animate={{ rotateY: 360 }}
-                        transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    >
-                        <FileText size={80} color="var(--color-primary)" strokeWidth={1.5} />
-                    </motion.div>
-                    <motion.div
-                        animate={{
-                            y: [-5, 5, -5]
-                        }}
-                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                        style={{
-                            position: 'absolute',
-                            bottom: -10,
-                            right: -25
-                        }}
-                    >
-                        <ScanLine size={28} color="var(--color-primary)" />
-                    </motion.div>
-                </div>
-                <h2 className="hero-title" style={{ marginTop: '1.5rem', fontSize: '2.5rem' }}>
-                    Analyzing Your CV...
-                </h2>
+            <div className="card progress-panel fade-in">
+                <div className="progress-panel-icon"><ScanLine size={22} /></div>
+                <h2>Analyzing your CV</h2>
+                <p>Checking your fit for {job.title} at {job.company}</p>
+                <GenerationProgress type="analysis" />
             </div>
         );
     }
 
     return (
-        <div className="cv-upload-container card fade-in" style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center', padding: '3rem', position: 'relative' }}>
-            <button
-                className="btn btn-ghost"
-                onClick={onBack}
-                style={{
-                    position: 'absolute',
-                    top: '1.5rem',
-                    left: '1.5rem',
-                    color: 'var(--color-text-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.5rem 1rem',
-                    borderRadius: '20px',
-                    fontSize: '0.9rem'
-                }}
-            >
-                <ArrowLeft size={18} /> Back
-            </button>
+        <div className="upload-layout fade-in">
+            {backButton}
 
-            <div style={{ marginBottom: '2rem' }}>
-                <div style={{ height: '5rem' }}></div>
-                <h2>Analyze your fit for {job.title}</h2>
-                <p style={{ color: 'var(--color-text-muted)' }}>at {job.company}</p>
-            </div>
+            <div className="card upload-card">
+                <div className="job-summary">
+                    <div className="company-avatar" aria-hidden="true">
+                        {(job.company || '?').trim().charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                        <div className="job-summary-label">Selected job</div>
+                        <div className="job-summary-title">{job.title}</div>
+                        <div className="job-summary-company">{job.company}{job.location ? ` · ${job.location}` : ''}</div>
+                    </div>
+                </div>
 
-            {/* Error Alert - shown at top */}
-            {displayError && (
-                <div className="alert alert-error" style={{ marginBottom: '1.5rem', textAlign: 'left', display: 'flex', alignItems: 'flex-start', gap: '0.75rem', position: 'relative' }}>
-                    <AlertCircle size={20} style={{ flexShrink: 0, marginTop: '2px' }} />
-                    <div style={{ fontSize: '0.95rem', lineHeight: 1.5, flex: 1 }}>
-                        {displayError.includes('buymeacoffee') ? (
-                            <span>
-                                Server is busy due to high demand. Please help keep the servers running — {' '}
-                                <a
-                                    href="https://buymeacoffee.com/manojthapa"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    style={{ color: 'var(--color-warning)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
-                                >
-                                    <Coffee size={16} /> Buy me a coffee
-                                </a>
-                            </span>
+                <div className="upload-body">
+                    <h2>Upload your CV</h2>
+                    <p>We'll compare it with this job description and show your match score, matching skills and gaps.</p>
+
+                    {/* Error Alert - shown at top */}
+                    {errorAlert}
+
+                    <div
+                        className={`dropzone ${isDragging ? 'dragging' : ''}`}
+                        onDragEnter={handleDrag}
+                        onDragLeave={handleDrag}
+                        onDragOver={handleDrag}
+                        onDrop={handleDrop}
+                    >
+                        {!file ? (
+                            <>
+                                <div className="dropzone-icon"><UploadCloud size={22} /></div>
+                                <h3>Drag and drop your CV here</h3>
+                                <p>or</p>
+                                <label className="btn btn-secondary">
+                                    Browse files
+                                    <input type="file" onChange={handleFileSelect} accept=".pdf,.docx" hidden />
+                                </label>
+                                <p>PDF or DOCX</p>
+                            </>
                         ) : (
-                            displayError
+                            <div className="file-preview">
+                                <div className="dropzone-icon"><FileText size={22} /></div>
+                                <h3>{file.name}</h3>
+                                <p>{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                                <div className="file-actions">
+                                    <button className="btn btn-primary btn-sm" onClick={handleAnalyzeClick}>
+                                        <RefreshCw size={15} /> Try again
+                                    </button>
+                                    <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setFile(null); }}>
+                                        <Trash2 size={15} /> Remove file
+                                    </button>
+                                </div>
+                            </div>
                         )}
                     </div>
-                    <button
-                        onClick={() => { setError(null); setDismissedError(true); }}
-                        style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: 'inherit',
-                            cursor: 'pointer',
-                            padding: '0.25rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            opacity: 0.7,
-                            transition: 'opacity 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.target.style.opacity = 1}
-                        onMouseLeave={(e) => e.target.style.opacity = 0.7}
-                    >
-                        <X size={18} />
-                    </button>
-                </div>
-            )}
 
-            <div
-                className={`dropzone ${isDragging ? 'dragging' : ''}`}
-                onDragEnter={handleDrag}
-                onDragLeave={handleDrag}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-                style={{
-                    border: isDragging ? '2px dashed var(--color-primary)' : 'none',
-                    borderRadius: '12px',
-                    padding: '3rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    background: isDragging ? 'rgba(45, 212, 191, 0.05)' : 'transparent',
-                }}
-            >
-                {!file ? (
-                    <>
-                        <Upload size={64} style={{ color: 'var(--color-text-muted)', marginBottom: '1rem' }} />
-                        <h3>Drop your CV here</h3>
-                        <p style={{ margin: '1rem 0', color: 'var(--color-text-muted)' }}>or</p>
-                        <label className="btn btn-secondary">
-                            Browse Files
-                            <input type="file" onChange={handleFileSelect} accept=".pdf,.docx" hidden />
-                        </label>
-                        <p style={{ marginTop: '1rem', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Supported formats: PDF, DOCX</p>
-                    </>
-                ) : (
-                    <div className="file-preview">
-                        <FileText size={48} style={{ color: 'var(--color-primary)' }} />
-                        <h3 style={{ marginTop: '1rem' }}>{file.name}</h3>
-                        <p style={{ color: 'var(--color-text-muted)' }}>{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                            style={{
-                                marginTop: '1rem',
-                                background: 'transparent',
-                                border: 'none',
-                                color: 'var(--color-text-muted)',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                padding: '0.5rem',
-                                borderRadius: '8px',
-                                transition: 'all 0.2s',
-                                margin: '1rem auto 0'
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-error)'; e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.background = 'transparent'; }}
-                        >
-                            <Trash2 size={18} /> Remove File
-                        </button>
+                    <div className="upload-note">
+                        <ShieldCheck size={14} /> Your CV is processed in memory and never stored.
                     </div>
-                )}
+                </div>
             </div>
-        </div >
+        </div>
     );
 }
 

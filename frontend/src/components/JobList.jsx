@@ -1,6 +1,46 @@
-import { useState, useEffect } from 'react';
-import { MapPin, Calendar, DollarSign, Clock, Building, Search, ChevronLeft, ChevronRight, Briefcase, ChevronDown, SearchX } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { MapPin, Banknote, Clock, ChevronLeft, ChevronRight, ChevronDown, Check, SearchX, ExternalLink, CalendarDays } from 'lucide-react';
 import { motion } from 'framer-motion';
+
+const DATE_FILTERS = [
+    { value: 'all', label: 'Any time' },
+    { value: 'today', label: 'Past 24 hours' },
+    { value: '3days', label: 'Past 3 days' },
+    { value: 'week', label: 'Past week' },
+    { value: 'month', label: 'Past month' }
+];
+
+// Placeholder grid shown while jobs are loading
+export function JobListSkeleton() {
+    return (
+        <div aria-busy="true" aria-label="Loading jobs">
+            <div className="results-header">
+                <div className="skeleton" style={{ width: 140, height: 22 }} />
+                <div className="skeleton" style={{ width: 170, height: 38, borderRadius: 'var(--radius)' }} />
+            </div>
+            <div className="job-grid">
+                {Array.from({ length: 6 }, (_, i) => (
+                    <div key={i} className="card job-card skeleton-card">
+                        <div className="skeleton" style={{ width: '75%', height: 18 }} />
+                        <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
+                            <div className="skeleton" style={{ width: 36, height: 36 }} />
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <div className="skeleton" style={{ width: '50%', height: 12 }} />
+                                <div className="skeleton" style={{ width: '35%', height: 12 }} />
+                            </div>
+                        </div>
+                        <div className="skeleton" style={{ width: '100%', height: 12 }} />
+                        <div className="skeleton" style={{ width: '85%', height: 12 }} />
+                        <div className="job-card-footer">
+                            <div className="skeleton" style={{ flex: 1, height: 34 }} />
+                            <div className="skeleton" style={{ width: 72, height: 34 }} />
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
 
 function JobList({ jobs, selectedJob, onSelectJob, cvSkills = [], postedFilter, setPostedFilter, hasSearched }) {
     const [isSmallScreen, setIsSmallScreen] = useState(window.innerWidth < 400);
@@ -11,7 +51,7 @@ function JobList({ jobs, selectedJob, onSelectJob, cvSkills = [], postedFilter, 
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
-    // Filter jobs based on posted date - HMR Trigger
+    // Filter jobs based on posted date
     const getFilteredJobs = () => {
         if (!jobs) return [];
 
@@ -112,6 +152,17 @@ function JobList({ jobs, selectedJob, onSelectJob, cvSkills = [], postedFilter, 
     const [currentPage, setCurrentPage] = useState(1);
     const maxPages = isSmallScreen ? 3 : 5;
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const dropdownRef = useRef(null);
+
+    // Close the date filter when clicking outside it
+    useEffect(() => {
+        if (!isDropdownOpen) return;
+        const handleClick = (e) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setIsDropdownOpen(false);
+        };
+        document.addEventListener('mousedown', handleClick);
+        return () => document.removeEventListener('mousedown', handleClick);
+    }, [isDropdownOpen]);
 
     // Reset page when filter changes or jobs change
     const totalPages = Math.ceil(filteredJobs.length / JOBS_PER_PAGE);
@@ -120,106 +171,64 @@ function JobList({ jobs, selectedJob, onSelectJob, cvSkills = [], postedFilter, 
     const startIndex = (validPage - 1) * JOBS_PER_PAGE;
     const paginatedJobs = filteredJobs.slice(startIndex, startIndex + JOBS_PER_PAGE);
 
+    const goToPage = (page) => {
+        setCurrentPage(page);
+        document.querySelector('.results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
     const container = {
         hidden: { opacity: 0 },
         show: {
             opacity: 1,
             transition: {
-                staggerChildren: 0.05
+                staggerChildren: 0.03
             }
         }
     };
 
     const item = {
-        hidden: { opacity: 0, y: 20 },
+        hidden: { opacity: 0, y: 8 },
         show: { opacity: 1, y: 0 }
     };
 
-
+    const currentFilterLabel = DATE_FILTERS.find(f => f.value === postedFilter)?.label;
 
     return (
         <div className="job-list-container">
             {/* Controls / Filter Bar */}
-            <div className="list-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-                <h2 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>
-                    <span className="text-gradient">{filteredJobs.length} Jobs Found</span>
+            <div className="results-header">
+                <h2 className="results-count">
+                    {filteredJobs.length.toLocaleString()} <span>{filteredJobs.length === 1 ? 'job' : 'jobs'} found</span>
                 </h2>
 
-                <div className="filter-select" style={{ position: 'relative', zIndex: 20 }}>
+                <div className="dropdown" ref={dropdownRef}>
                     <button
                         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                        className="btn"
-                        style={{
-                            background: 'rgba(255, 255, 255, 0.05)',
-                            border: '1px solid var(--color-border)',
-                            color: 'var(--color-text-primary)',
-                            padding: '0.6rem 1.25rem',
-                            borderRadius: '12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.75rem',
-                            minWidth: '160px',
-                            justifyContent: 'space-between',
-                            cursor: 'pointer'
-                        }}
+                        className={`btn btn-secondary btn-sm dropdown-trigger ${isDropdownOpen ? 'open' : ''}`}
+                        aria-haspopup="listbox"
+                        aria-expanded={isDropdownOpen}
                     >
-                        <span style={{ fontSize: '0.9rem' }}>
-                            {postedFilter === 'all' && 'Any time'}
-                            {postedFilter === 'today' && 'Past 24 hours'}
-                            {postedFilter === '3days' && 'Past 3 days'}
-                            {postedFilter === 'week' && 'Past week'}
-                            {postedFilter === 'month' && 'Past month'}
-                        </span>
-                        <ChevronDown size={16} style={{ transition: 'transform 0.3s', transform: isDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+                        <CalendarDays size={15} />
+                        <span style={{ flex: 1, textAlign: 'left' }}>{currentFilterLabel}</span>
+                        <ChevronDown size={15} />
                     </button>
 
                     {isDropdownOpen && (
-                        <div
-                            style={{
-                                position: 'absolute',
-                                top: '120%',
-                                right: 0,
-                                width: '100%',
-                                minWidth: '180px',
-                                background: '#050b14',
-                                backdropFilter: 'none',
-                                border: '1px solid var(--color-border)',
-                                borderRadius: '12px',
-                                padding: '0.5rem',
-                                boxShadow: '0 10px 40px -10px rgba(0,0,0,0.5)',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '0.25rem'
-                            }}
-                        >
-                            {[
-                                { value: 'all', label: 'Any time' },
-                                { value: 'today', label: 'Past 24 hours' },
-                                { value: '3days', label: 'Past 3 days' },
-                                { value: 'week', label: 'Past week' },
-                                { value: 'month', label: 'Past month' }
-                            ].map(option => (
+                        <div className="dropdown-menu" role="listbox">
+                            {DATE_FILTERS.map(option => (
                                 <button
                                     key={option.value}
+                                    role="option"
+                                    aria-selected={postedFilter === option.value}
                                     onClick={() => {
                                         setPostedFilter(option.value);
                                         setCurrentPage(1);
                                         setIsDropdownOpen(false);
                                     }}
-                                    style={{
-                                        background: postedFilter === option.value ? 'rgba(45, 212, 191, 0.15)' : 'transparent',
-                                        color: postedFilter === option.value ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                                        border: 'none',
-                                        padding: '0.6rem 1rem',
-                                        borderRadius: '8px',
-                                        textAlign: 'left',
-                                        cursor: 'pointer',
-                                        fontSize: '0.9rem',
-                                        transition: 'all 0.2s'
-                                    }}
-                                    className="dropdown-item"
+                                    className={`dropdown-item ${postedFilter === option.value ? 'selected' : ''}`}
                                 >
                                     {option.label}
+                                    {postedFilter === option.value && <Check size={15} />}
                                 </button>
                             ))}
                         </div>
@@ -233,190 +242,133 @@ function JobList({ jobs, selectedJob, onSelectJob, cvSkills = [], postedFilter, 
                 variants={container}
                 initial="hidden"
                 animate="show"
-                style={{ display: 'grid', gap: '1.5rem' }}
+                key={`${postedFilter}-${validPage}`}
             >
                 {filteredJobs.length === 0 ? (
-                    <div className="card no-hover" style={{ padding: '4rem 2rem', gridColumn: '1 / -1', maxWidth: '800px', margin: '0 auto', width: '100%', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                        <div style={{ color: 'var(--color-primary)', marginBottom: '1.5rem', background: 'rgba(45, 212, 191, 0.1)', display: 'inline-flex', padding: '1.5rem', borderRadius: '50%' }}>
-                            <SearchX size={48} />
-                        </div>
-                        <h3 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>No jobs match your criteria</h3>
-                        <p style={{ color: 'var(--color-text-secondary)', maxWidth: '400px', margin: '0 auto' }}>Try adjusting your search terms, location, or the "Date Posted" filter to see more results.</p>
+                    <div className="card empty-state">
+                        <div className="empty-icon"><SearchX size={22} /></div>
+                        <h3>No jobs match your criteria</h3>
+                        <p>Try different keywords or location, or widen the date posted filter.</p>
                     </div>
                 ) : (
-                    paginatedJobs.map(job => (
-                        <motion.div
-                            key={job.id}
-                            variants={item}
-                            className={`job-card card ${selectedJob?.id === job.id ? 'active' : ''}`}
-                            onClick={() => onSelectJob(job)}
-                            whileHover={{ y: -5, transition: { duration: 0.2 } }}
-                            style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', height: '100%' }}
-                        >
-                            <div className="job-header" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                                <div style={{ flex: 1 }}>
-                                    <h3 className="job-title" style={{ fontSize: '1.15rem', lineHeight: '1.4' }}>{job.title}</h3>
-                                    {job.location && (
-                                        <span className="job-location" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>
-                                            <MapPin size={14} /> {job.location}
+                    paginatedJobs.map(job => {
+                        const snippet = cleanSnippet(job.description, job.title);
+
+                        return (
+                            <motion.article
+                                key={job.id}
+                                variants={item}
+                                className={`card job-card ${selectedJob?.id === job.id ? 'active' : ''}`}
+                                onClick={() => onSelectJob(job)}
+                            >
+                                <div className="job-card-top">
+                                    <h3 className="job-title">{job.title}</h3>
+                                    <span className="job-date">{formatDate(job.created)}</span>
+                                </div>
+
+                                <div className="job-company">
+                                    <div className="company-avatar" aria-hidden="true">
+                                        {(job.company || '?').trim().charAt(0).toUpperCase()}
+                                    </div>
+                                    <div className="company-info">
+                                        <div className="company-name">{job.company}</div>
+                                        {job.location && (
+                                            <div className="company-location">
+                                                <MapPin size={12} /> {job.location}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {snippet && <p className="job-snippet">{snippet}</p>}
+
+                                <div className="job-meta">
+                                    <span className="meta-item">
+                                        <Banknote size={13} /> {formatSalary(job)}
+                                    </span>
+                                    {job.contract_time && job.contract_time !== 'Unknown' && (
+                                        <span className="meta-item">
+                                            <Clock size={13} /> {job.contract_time}
                                         </span>
                                     )}
                                 </div>
-                                <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0, marginTop: '0.2rem' }}>
-                                    <Calendar size={14} />
-                                    {formatDate(job.created)}
-                                </span>
-                            </div>
 
-                            <div className="job-company" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', fontWeight: 600 }}>
-                                <div style={{ padding: '0.4rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                                    <Building size={16} />
+                                <div className="job-card-footer">
+                                    <button className="btn btn-primary btn-sm">
+                                        Analyze fit
+                                    </button>
+                                    <a
+                                        href={job.redirect_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={(e) => e.stopPropagation()}
+                                        title="View original listing"
+                                    >
+                                        View <ExternalLink size={13} />
+                                    </a>
                                 </div>
-                                {job.company}
-                            </div>
-
-                            <div className="job-meta" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
-                                <span className="meta-item">
-                                    <DollarSign size={14} /> {formatSalary(job)}
-                                </span>
-                                {job.contract_time && job.contract_time !== 'Unknown' && (
-                                    <span className="meta-item">
-                                        <Clock size={14} /> {job.contract_time}
-                                    </span>
-                                )}
-                            </div>
-
-
-                            <div className="job-footer" style={{ marginTop: 'auto', display: 'flex', gap: '1rem' }}>
-                                <button className="btn btn-outline btn-sm btn-full">
-                                    Analyze Fit
-                                </button>
-                                <a
-                                    href={job.redirect_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={(e) => e.stopPropagation()}
-                                    title="View Original"
-                                >
-                                    View
-                                </a>
-                            </div>
-                        </motion.div>
-                    ))
+                            </motion.article>
+                        );
+                    })
                 )}
             </motion.div>
 
             {/* Pagination Controls */}
             {totalPages > 1 && (
-                <div className="pagination" style={{
-                    flexWrap: 'wrap',
-                    marginTop: '2rem',
-                    padding: '0',
-                    width: '100%',
-                    maxWidth: '100%',
-                    margin: '3rem auto 0',
-                    flexDirection: 'column'
-                }}>
-                    <div style={{ marginBottom: '1rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
+                <nav className="pagination" aria-label="Pagination">
+                    <div className="pagination-controls">
+                        <button
+                            className="icon-btn plain"
+                            onClick={() => goToPage(Math.max(1, validPage - 1))}
+                            disabled={validPage <= 1}
+                            aria-label="Previous page"
+                        >
+                            <ChevronLeft size={18} />
+                        </button>
+
+                        {/* Page Numbers */}
+                        {Array.from({ length: Math.min(maxPages, totalPages) }, (_, i) => {
+                            let pageNum;
+                            // Always show "maxPages" buttons, centered around the current page
+                            if (totalPages <= maxPages) {
+                                pageNum = i + 1;
+                            } else if (validPage <= Math.ceil(maxPages / 2)) {
+                                pageNum = i + 1;
+                            } else if (validPage >= totalPages - Math.floor(maxPages / 2)) {
+                                pageNum = totalPages - maxPages + 1 + i;
+                            } else {
+                                pageNum = validPage - Math.floor(maxPages / 2) + i;
+                            }
+
+                            return (
+                                <button
+                                    key={pageNum}
+                                    className={`page-btn ${validPage === pageNum ? 'active' : ''}`}
+                                    onClick={() => goToPage(pageNum)}
+                                    aria-current={validPage === pageNum ? 'page' : undefined}
+                                >
+                                    {pageNum}
+                                </button>
+                            );
+                        })}
+
+                        <button
+                            className="icon-btn plain"
+                            onClick={() => goToPage(Math.min(totalPages, validPage + 1))}
+                            disabled={validPage >= totalPages}
+                            aria-label="Next page"
+                        >
+                            <ChevronRight size={18} />
+                        </button>
+                    </div>
+                    <div className="pagination-info">
                         Page {validPage} of {totalPages}
                     </div>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'center' }}>
-                        <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                            disabled={validPage <= 1}
-                            style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', opacity: validPage <= 1 ? 0.5 : 1 }}
-                        >
-                            <ChevronLeft size={20} />
-                        </button>
-
-                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            {/* Page Numbers */}
-                            {Array.from({ length: Math.min(maxPages, totalPages) }, (_, i) => {
-                                let pageNum;
-                                // Logic to always show "maxPages" centered around current page
-                                // But keeping first/last pages reachable
-                                // Generalized logic:
-                                if (totalPages <= maxPages) {
-                                    pageNum = i + 1;
-                                } else if (validPage <= Math.ceil(maxPages / 2)) {
-                                    pageNum = i + 1;
-                                } else if (validPage >= totalPages - Math.floor(maxPages / 2)) {
-                                    pageNum = totalPages - maxPages + 1 + i;
-                                } else {
-                                    pageNum = validPage - Math.floor(maxPages / 2) + i;
-                                }
-
-                                // Planet Textures Mapping (Mercury -> Neptune)
-                                const planets = [
-                                    { name: 'Mercury', bg: "url('/textures/mercury_map.jpg')", color: '#fff' },
-                                    { name: 'Venus', bg: "url('/textures/venus_map.jpg')", color: '#000' },
-                                    { name: 'Earth', bg: "linear-gradient(135deg, rgba(20,80,180,0.7), rgba(40,120,220,0.6)), url('/textures/earth_daymap.jpg')", color: '#fff' },
-                                    { name: 'Mars', bg: "url('/textures/mars_map.jpg')", color: '#fff' },
-                                    { name: 'Jupiter', bg: "url('/textures/jupiter_map.jpg')", color: '#fff' },
-                                    { name: 'Saturn', bg: "url('/textures/saturn_map.jpg')", color: '#fff' },
-                                    { name: 'Uranus', bg: "url('/textures/uranus_map.jpg')", color: '#000' },
-                                    { name: 'Neptune', bg: "url('/textures/neptune_map.jpg')", color: '#fff' }
-                                ];
-
-                                const planetIndex = (pageNum - 1) % 8;
-                                const planet = planets[planetIndex];
-
-                                return (
-                                    <button
-                                        key={i}
-                                        className={`btn`}
-                                        onClick={() => setCurrentPage(pageNum)}
-                                        style={{
-                                            width: '35px',
-                                            height: '35px',
-                                            padding: 0,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '50%',
-                                            fontSize: '0.75rem',
-                                            fontWeight: 'bold',
-                                            backgroundImage: planet.bg,
-                                            backgroundSize: '200%',
-                                            backgroundPosition: '50% 30%',
-                                            backgroundColor: '#1a3a5c',
-                                            color: '#fff',
-                                            border: validPage === pageNum ? '1px solid rgba(255,255,255,0.5)' : '1px solid rgba(255,255,255,0.15)',
-                                            boxShadow: 'none',
-                                            transition: 'all 0.3s',
-                                            transform: validPage === pageNum ? 'scale(1.1)' : 'scale(1)'
-                                        }}
-                                        title={`${planet.name} (Page ${pageNum})`}
-                                    >
-                                        <span style={{
-                                            position: 'relative',
-                                            zIndex: 2,
-                                            textShadow: '0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.8)'
-                                        }}>
-                                            {pageNum}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-
-                        <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                            disabled={validPage >= totalPages}
-                            style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', opacity: validPage >= totalPages ? 0.5 : 1 }}
-                        >
-                            <ChevronRight size={20} />
-                        </button>
-                    </div>
-                </div>
-            )
-            }
-        </div >
+                </nav>
+            )}
+        </div>
     );
 }
 
 export default JobList;
-

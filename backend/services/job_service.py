@@ -4,12 +4,26 @@ Searches jobs from Reed.co.uk API (UK's largest job board)
 """
 import httpx
 import os
+import re
+import html
 import base64
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def html_to_text(raw: str) -> str:
+    """Convert Reed's HTML job description to plain text, keeping line structure"""
+    if not raw:
+        return ""
+    text = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</h[1-6]>|</li>", "\n", raw)
+    text = re.sub(r"(?i)<li[^>]*>", "- ", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    lines = [re.sub(r"[ \t\u00a0]+", " ", line).strip() for line in text.split("\n")]
+    return "\n".join(line for line in lines if line)
 
 
 class JobService:
@@ -274,6 +288,8 @@ class JobService:
         }
         
         if full_details:
+            # Full listings return HTML; search results only return a ~450 character snippet
+            normalized["description"] = html_to_text(normalized["description"])
             normalized["applications"] = job.get("applications", 0)
             normalized["employer_profile_url"] = job.get("employerProfileUrl", "")
         

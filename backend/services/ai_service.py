@@ -1,45 +1,121 @@
 """
 AI Service - LLM Integration for CV Tailoring
-Uses Azure AI Inference SDK with GitHub Models
+Uses the Groq API (OpenAI-compatible chat completions)
 """
 import os
+import re
 import json
-from typing import Dict, Any, Optional
-from azure.ai.inference import ChatCompletionsClient
-from azure.ai.inference.models import SystemMessage, UserMessage
-from azure.core.credentials import AzureKeyCredential
+from typing import Dict, Any, Optional, List
+import httpx
 import logging
 
 logger = logging.getLogger(__name__)
+
+# How much of each input the model sees (full Reed descriptions are ~4-7k characters)
+MAX_CV_CHARS = 8000
+MAX_JD_CHARS = 6000
+
+# The overall match score is computed here from the model's findings, not by the model
+SCORE_WEIGHTS = {"skills": 0.60, "title": 0.20, "experience": 0.12, "education": 0.08}
+IMPORTANCE_WEIGHT = {"must": 2.0, "nice": 1.0}
+STATUS_CREDIT = {"met": 1.0, "partial": 0.5, "missing": 0.0}
+EDUCATION_SCORE = {"met": 100, "related": 70, "missing": 30, "not_required": 100}
+# Ceilings, not fixed ranges: the score follows the evidence, and a wrong-field
+# CV still can't score well. Fixed floors made the score jump when the model's
+# domain judgement flipped between runs.
+DOMAIN_CAPS = {"complete_mismatch": 30, "weak_match": 65, "good_match": 100}
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and collapse punctuation, keeping characters used in skill names (C++, C#, Node.js)"""
+    return re.sub(r"[^a-z0-9+#.]+", " ", (text or "").lower()).strip()
+
+
+def _words(text_norm: str) -> set:
+    return {w.strip(".") for w in text_norm.split()}
+
+
+def _mentions(text_norm: str, phrase: str) -> bool:
+    """True if the phrase appears in already-normalized text as whole words"""
+    p = _normalize(phrase).strip(".")
+    return bool(p) and re.search(rf"(?<![a-z0-9]){re.escape(p)}(?![a-z0-9])", text_norm) is not None
+
+
+def _has_evidence(req: Dict[str, Any], cv_norm: str, cv_words: set) -> bool:
+    """Check the model's claimed evidence actually exists in the CV"""
+    if _mentions(cv_norm, req["name"]):
+        return True
+    words = [w.strip(".") for w in _normalize(req.get("evidence", "")).split() if len(w.strip(".")) > 2]
+    return bool(words) and sum(w in cv_words for w in words) / len(words) >= 0.6
+
+
+def _clean_requirements(raw: Any) -> List[Dict[str, Any]]:
+    """Validate the model's requirement list and drop duplicates"""
+    reqs, seen = [], set()
+    for r in raw if isinstance(raw, list) else []:
+        if not isinstance(r, dict) or not str(r.get("name", "")).strip():
+            continue
+        name = str(r["name"]).strip()
+        key = _normalize(name)
+        if key in seen:
+            continue
+        seen.add(key)
+        reqs.append({
+            "name": name,
+            "importance": r.get("importance") if r.get("importance") in IMPORTANCE_WEIGHT else "nice",
+            "status": r.get("status") if r.get("status") in STATUS_CREDIT else "missing",
+            "evidence": str(r.get("evidence") or "").strip()
+        })
+    # Must-haves first so they lead the missing-skills list
+    return sorted(reqs, key=lambda r: r["importance"] != "must")[:30]
+
+
+def _skills_score(reqs: List[Dict[str, Any]]) -> float:
+    total = sum(IMPORTANCE_WEIGHT[r["importance"]] for r in reqs)
+    if not total:
+        return 50.0
+    return 100 * sum(IMPORTANCE_WEIGHT[r["importance"]] * STATUS_CREDIT[r["status"]] for r in reqs) / total
+
+
+def _to_number(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _overall_score(skills: float, title: float, experience: float, education: float, domain_match: str) -> int:
+    raw = (SCORE_WEIGHTS["skills"] * skills + SCORE_WEIGHTS["title"] * title
+           + SCORE_WEIGHTS["experience"] * experience + SCORE_WEIGHTS["education"] * education)
+    return int(round(min(raw, DOMAIN_CAPS.get(domain_match, 100))))
 
 class AIService:
     """Service for AI-powered CV tailoring"""
     
     def __init__(self):
-        self.token = os.getenv("GITHUB_TOKEN", "")
-        self.endpoint = "https://models.inference.ai.azure.com"
+        self.api_key = os.getenv("GROQ_API_KEY", "")
+        self.endpoint = "https://api.groq.com/openai/v1/chat/completions"
         # Priority list: Try best model first, then fallback
-        self.models = ["gpt-4o", "gpt-4o-mini"]
+        # (each model has its own rate limit, so falling back also spreads load)
+        self.models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
         
-        if not self.token:
-            logger.warning("⚠️ GITHUB_TOKEN not found. AI features will be unavailable.")
+        if not self.api_key:
+            logger.warning("⚠️ GROQ_API_KEY not found. AI features will be unavailable.")
             self.client = None
         else:
-            # Disable automatic retries - we handle fallback ourselves
-            self.client = ChatCompletionsClient(
-                endpoint=self.endpoint,
-                credential=AzureKeyCredential(self.token),
-                retry_total=0  # Don't wait on rate limits, fail fast
+            self.client = httpx.Client(
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=60.0
             )
     
-    def _call_llm(self, system_prompt: str, user_prompt: str, json_mode: bool = False) -> Dict[str, Any]:
+    def _call_llm(self, system_prompt: str, user_prompt: str, json_mode: bool = False, temperature: float = 0.7) -> Dict[str, Any]:
         """
         Make a call to the LLM with automatic fallback support
         """
         if not self.client:
             return {
                 "success": False,
-                "error": "AI service not configured. Set GITHUB_TOKEN environment variable."
+                "error": "AI service not configured. Set GROQ_API_KEY environment variable."
             }
         
         # Prepare the prompt once
@@ -53,20 +129,31 @@ class AIService:
         for model in self.models:
             logger.info(f"🤖 Attempting AI call with model: {model}...")
             try:
-                response = self.client.complete(
-                    messages=[
-                        SystemMessage(content=system_prompt),
-                        UserMessage(content=full_user_prompt)
+                response = self.client.post(self.endpoint, json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": full_user_prompt}
                     ],
-                    model=model,
-                    temperature=0.7,
-                    max_tokens=4000,
-                    timeout=10  # Fail fast (10s)
-                )
+                    "temperature": temperature,
+                    # Reasoning tokens count toward this budget on gpt-oss models
+                    "max_tokens": 8000,
+                    "reasoning_effort": "low"
+                })
                 
-                content = response.choices[0].message.content
-                logger.info(f"✅ Success with {model}")
+                # Auth error - Stop immediately
+                if response.status_code == 401:
+                    return {
+                        "success": False,
+                        "error": "Invalid API key. Please check your GROQ_API_KEY."
+                    }
+                response.raise_for_status()
                 
+                data = response.json()
+                content = data["choices"][0]["message"]["content"] or ""
+                usage = data.get("usage", {})
+                logger.info(f"✅ Success with {model} (tokens: {usage.get('prompt_tokens')} in, {usage.get('completion_tokens')} out)")
+
                 # Parse JSON if requested
                 if json_mode:
                     try:
@@ -89,7 +176,8 @@ class AIService:
                         parsed_content = json.loads(clean_content)
                         return {
                             "success": True,
-                            "data": parsed_content
+                            "data": parsed_content,
+                            "usage": usage
                         }
                     except json.JSONDecodeError:
                         logger.error(f"❌ JSON Parse Error with {model}")
@@ -103,24 +191,14 @@ class AIService:
                 return {
                     "success": True,
                     "content": content,
-                    "usage": {
-                        "prompt_tokens": response.usage.prompt_tokens,
-                        "completion_tokens": response.usage.completion_tokens
-                    }
+                    "usage": usage
                 }
 
             except Exception as e:
                 last_error = str(e)
                 logger.warning(f"⚠️ AI Error with {model}: {last_error}")
                 
-                # Auth error - Stop immediately
-                if "401" in last_error or "unauthorized" in last_error.lower():
-                    return {
-                        "success": False,
-                        "error": "Invalid API token. Please check your GITHUB_TOKEN."
-                    }
-                
-                # Rate limit or timeout - Continue to next model
+                # Rate limit, timeout or server error - Continue to next model
                 continue
 
         # If we get here, all models failed
@@ -131,6 +209,42 @@ class AIService:
             "details": last_error
         }
     
+    ANALYZE_SYSTEM_PROMPT = """You are a senior recruiter and ATS (Applicant Tracking System) analyst. You compare a candidate's CV against one job description and report checkable facts. You do NOT calculate the overall score - it is computed from your findings.
+
+Work through these steps:
+
+1. VALIDATE
+If the CV text is not a CV/resume (an article, recipe, source code, lyrics, random text), return {"is_valid_cv": false, "rejection_reason": "<one polite sentence>"} and nothing else.
+
+2. EXTRACT REQUIREMENTS
+From the job description, list 10-25 concrete requirements a recruiter or ATS would screen for: hard skills, tools, technologies, certifications/licences, qualifications, domain knowledge, and at most 3 key soft skills. Use the job's own wording, kept short ("PostgreSQL", "Stakeholder management", "CSCS card"). Ignore benefits and company boilerplate.
+- importance "must": stated as required/essential, in the job title, repeated, or central to the main duties
+- importance "nice": preferred, desirable, bonus, or minor
+
+3. CHECK EACH REQUIREMENT AGAINST THE CV
+- "met": the CV clearly shows it, either the same thing or a clear equivalent ("Postgres" for "PostgreSQL", "RGN" for "Registered Nurse")
+- "partial": weaker or related evidence (a similar tool, used in a personal project rather than at work, fewer years than asked)
+- "missing": no evidence anywhere in the CV
+- "evidence": for met/partial, copy a short EXACT phrase from the CV (max 12 words) that proves it. For missing, use "". Never write evidence that is not in the CV text - unsupported claims are discarded.
+
+4. DOMAIN MATCH
+- "good_match": the candidate's background fits this kind of role
+- "weak_match": a related field but missing key experience, or clearly too junior for the level asked
+- "complete_mismatch": a fundamentally different field (e.g. a software developer applying for a nursing role)
+
+5. OTHER FACTS
+- title_alignment (0-100): how closely the candidate's recent job titles match the target role (same title 100, similar 80, related field 50, unrelated 20)
+- experience.required_years: minimum years of experience the job asks for, null if not stated
+- experience.candidate_years: the candidate's total relevant years based on CV dates, null if unclear
+- education: "met" (required degree/qualification held), "related", "missing", or "not_required"
+
+6. GUIDANCE
+- project_recommendations: 2-4 specific, buildable projects or experiences that would prove the most important MISSING requirements. Empty list for complete_mismatch.
+- advice: 2-4 concrete tips for this CV and this job, based on the candidate's real experience (which existing work to lead with, which of the job's terms to mirror, what to quantify).
+- summary: 1-2 sentences on the overall fit. For complete_mismatch, say the background is in a different field and name the kind of role that would fit instead.
+
+Respond with a single JSON object and nothing else."""
+
     def analyze_fit(
         self,
         cv_text: str,
@@ -139,324 +253,129 @@ class AIService:
         job_description: str
     ) -> Dict[str, Any]:
         """
-        Perform deep analysis of CV fit for a job
-        Returns score, missing skills, and advice
+        Compare a CV against a job description.
+
+        The model reports each requirement with evidence from the CV; the score
+        is then computed here so it is consistent and explainable.
         """
-        system_prompt = """You are an expert ATS (Applicant Tracking System) scoring engine and technical recruiter. Your task is to calculate a match score between a CV and a job description while checking domain/background compatibility.
+        user_prompt = f"""TARGET ROLE: {job_title}
 
-═══════════════════════════════════════════════════════════
-STEP 0: CONTENT VALIDATION (CRITICAL FIRST STEP)
-═══════════════════════════════════════════════════════════
+JOB DESCRIPTION:
+{job_description[:MAX_JD_CHARS]}
 
-First, analyze the candidate input to ensure it is actually a professional CV/Resume. 
-A valid CV must contain:
-- Professional experience or history
-- Educational background
-- Skills or qualifications
-- Contact information (or placeholders for it)
+CANDIDATE CV:
+{cv_text[:MAX_CV_CHARS]}
 
-REJECT the document if it appears to be:
-- A recipe, lyrics, fan fiction, or creative writing
-- Source code or logs (unless part of a portfolio in a CV context)
-- A generic article, blog post, or essay
-- Random incoherent text
+SKILLS DETECTED BY THE PARSER (hints only, may be incomplete): {', '.join(cv_skills[:40])}
 
-IF REJECTED:
-- Set "is_valid_cv": false
-- Provide a polite "rejection_reason" explaining why.
-- You can stop processing further steps.
-
-IF VALID:
-- Set "is_valid_cv": true
-- Proceed to Step 1.
-
-═══════════════════════════════════════════════════════════
-STEP 1: EXTRACT JOB-SPECIFIC REQUIREMENTS
-═══════════════════════════════════════════════════════════
-
-Before scoring, you MUST first analyze the job description and extract: 
-
-a) JOB TITLE: What is the exact role? (e.g., "Senior Data Engineer", "Marketing Coordinator")
-
-b) REQUIRED KEYWORDS (Hard Skills):
-   - Technical skills mentioned (e.g., Python, AWS, SQL, React, Excel)
-   - Tools/software explicitly named (e.g., Salesforce, Docker, Tableau)
-   - Certifications required (e.g., PMP, AWS Certified, CPA)
-   - Programming languages, frameworks, platforms
-   - Extract 15-25 keywords minimum
-
-c) REQUIRED QUALIFICATIONS:
-   - Years of experience needed (e.g., "3-5 years", "entry-level")
-   - Education level (e.g., "Bachelor's in Computer Science", "MBA preferred")
-   - Industry experience (e.g., "fintech background", "healthcare experience")
-
-d) SOFT SKILLS & COMPETENCIES:
-   - Leadership, communication, teamwork, problem-solving
-   - Methodologies (e.g., Agile, Scrum, Design Thinking)
-
-e) KEYWORD FREQUENCY ANALYSIS:
-   - Count how many times each keyword appears in job description
-   - Keywords mentioned 3+ times are CRITICAL and weighted higher
-   - Mark keywords as "Must-Have" (in required section) vs "Nice-to-Have" (in preferred section)
-
-═══════════════════════════════════════════════════════════
-STEP 2: DOMAIN & BACKGROUND MATCH CHECK (CRITICAL)
-═══════════════════════════════════════════════════════════
-
-Determine if the candidate's educational/professional background is compatible with the target role:
-
-CATEGORY: "complete_mismatch"
-- The candidate's core field is FUNDAMENTALLY DIFFERENT from the job
-- Examples:
-  * CS graduate → Nursing role
-  * Mechanical Engineer → Software Developer (no coding experience)
-  * Arts major → Civil Engineering
-  * Marketing graduate → Data Scientist (no technical background)
-- ACTION: Set final score 15-29. Focus advice on applying for roles matching their actual background.
-
-CATEGORY: "weak_match"
-- The candidate's field is RELATED but lacks specific experience/projects
-- Examples:
-  * CS graduate → ML Engineer (but no ML projects)
-  * Fresh graduate → Senior role
-  * Backend developer → DevOps Engineer (no cloud/infrastructure experience)
-  * Junior developer → Lead Engineer
-- ACTION: Set final score 30-59. Provide specific project recommendations to build required skills.
-
-CATEGORY: "good_match"
-- The candidate's background aligns well with the role
-- Examples:
-  * Software Engineer → Senior Software Engineer
-  * Junior Data Analyst → Data Analyst
-  * Frontend Developer → React Developer
-- ACTION: Calculate normal ATS score 60-100. Focus on optimization tips.
-
-═══════════════════════════════════════════════════════════
-STEP 3: CALCULATE ATS MATCH SCORE
-═══════════════════════════════════════════════════════════
-
-Now score the CV using these 6 factors:
-
-1. KEYWORD MATCH SCORE (Weight: 35%)
-   
-   CRITICAL DISTINCTION:
-   - A skill is PRESENT if it appears ANYWHERE in the CV (skills section, experience, projects, education)
-   - Variants count as matches: "PostgreSQL" = "SQL", "React.js" = "React", "ML" = "Machine Learning"
-   - Do NOT require project experience to count a skill as present
-   
-   SCORING LOGIC:
-   - If skill appears in CV = MATCHED (full points)
-   - If skill does NOT appear anywhere in CV = MISSING
-   
-   Formula: (Matched Keywords / Total Extracted Keywords) × 100
-   - Critical keywords (mentioned 3+ times) weighted 1.5x
-   - Keywords in Professional Summary or Skills section get 1.2x bonus
-   
-   IMPORTANT: 
-   - missing_skills array should ONLY contain skills NOT mentioned anywhere in CV
-   - If "SQL" is in CV skills but no SQL projects exist, it's still MATCHED (not missing)
-   - Project recommendations are SEPARATE from missing skills
-
-2. JOB TITLE ALIGNMENT SCORE (Weight: 20%)
-   - Compare CV's current/recent titles with extracted target role
-   - Exact match = 100%
-   - Similar title = 80%
-   - Related field = 50%
-   - Unrelated = 20%
-
-3. SKILLS COVERAGE SCORE (Weight: 25%)
-   - Must-have skills from job description = 2 points each
-   - Nice-to-have skills = 1 point each
-   - Calculate: (Points Earned / Max Points) × 100
-   - Skill is counted if it appears ANYWHERE in CV
-
-4. EXPERIENCE LEVEL ALIGNMENT (Weight: 10%)
-   - Compare CV years vs job requirement
-   - Match or exceed = 100%
-   - Within 1 year = 80%
-   - 2+ years difference = 50%
-
-5. EDUCATION & CERTIFICATION MATCH (Weight: 5%)
-   - Required degree present = 100%
-   - Related degree = 70%
-   - Certifications match = +10% each
-
-6. FORMATTING & READABILITY SCORE (Weight: 5%)
-   - Standard sections = +20%
-   - Clean structure = +20%
-   - Contact info = +20%
-   - Bullet points = +20%
-   - Date formatting = +20%
-
-OVERALL SCORE = Sum of weighted scores
-
-IMPORTANT: Respect domain_match category limits:
-- complete_mismatch: final score must be 15-29
-- weak_match: final score must be 30-59
-- good_match: final score can be 60-100
-
-═══════════════════════════════════════════════════════════
-STEP 4: GENERATE RECOMMENDATIONS
-═══════════════════════════════════════════════════════════
-
-Based on domain_match:
-
-IF "complete_mismatch":
-- Clearly state the field mismatch in summary
-- Recommend roles matching their actual background
-- NO project recommendations (wrong field entirely)
-
-IF "weak_match":
-- Provide 3-5 SPECIFIC, BUILDABLE projects ONLY for skills that are MISSING from CV
-- Example: If CV has "SQL" listed but no projects, DON'T recommend SQL project
-- Example: If CV lacks "Docker" entirely, THEN recommend "Build a Dockerized application"
-- Suggest certifications for missing skills
-- Recommend entry-level roles or internships
-
-IF "good_match":
-- Focus on keyword optimization
-- Suggest rephrasing bullet points to emphasize existing skills more strongly
-- Recommend adding quantifiable achievements for skills already present
-- Highlight sections needing strengthening
-
-PROJECT RECOMMENDATION RULES:
-1. ONLY recommend projects for skills in the "missing_skills" array
-2. Do NOT recommend projects for skills already listed in CV
-3. Instead, for present skills without strong evidence, recommend:
-   - "Add quantifiable achievements for your SQL work"
-   - "Highlight your React projects more prominently"
-   - "Include metrics for your AWS experience"
-"""
-
-        user_prompt = f"""Analyze this candidate for the role of {job_title}.
-
-INPUTS PROVIDED:
-1. Candidate CV Content:
-Skills: {', '.join(cv_skills)}
-Experience Snippet: {cv_text[:3000]}
-
-2. Job Description:
-{job_description[:4000]}
-
-═══════════════════════════════════════════════════════════
-OUTPUT FORMAT (JSON)
-═══════════════════════════════════════════════════════════
-
+Return JSON in exactly this shape:
 {{
   "is_valid_cv": true,
   "rejection_reason": null,
-  "job_analysis": {{
-    "job_title": "extracted role title",
-    "required_experience": "e.g., 5+ years",
-    "required_education": "e.g., Bachelor's in Computer Science",
-    "extracted_keywords": {{
-      "must_have": ["keyword1", "keyword2"],
-      "nice_to_have": ["keyword3", "keyword4"],
-      "critical_keywords": ["keyword1"]
-    }},
-    "soft_skills": ["Agile", "Communication"]
-  }},
-  "domain_match": "complete_mismatch | weak_match | good_match",
-  "overall_ats_score": <number 0-100>,
-  "score_interpretation": "Brief explanation based on score and domain match",
-  "breakdown": {{
-    "keyword_match": {{
-      "score": 0-100,
-      "weight": 35,
-      "weighted_score": 0,
-      "matched_keywords": ["list of matched"],
-      "missing_critical_keywords": ["list of critical missing"]
-    }},
-    "job_title_alignment": {{
-      "score": 0-100,
-      "weight": 20,
-      "weighted_score": 0,
-      "details": "explanation of title match"
-    }},
-    "skills_coverage": {{
-      "score": 0-100,
-      "weight": 25,
-      "weighted_score": 0,
-      "must_have_present": 0,
-      "must_have_total": 0,
-      "nice_to_have_present": 0,
-      "nice_to_have_total": 0
-    }},
-    "experience_level": {{
-      "score": 0-100,
-      "weight": 10,
-      "weighted_score": 0,
-      "cv_experience": "extracted from CV",
-      "required_experience": "extracted from job"
-    }},
-    "education_certification": {{
-      "score": 0-100,
-      "weight": 5,
-      "weighted_score": 0,
-      "details": "explanation"
-    }},
-    "formatting_readability": {{
-      "score": 0-100,
-      "weight": 5,
-      "weighted_score": 0
-    }}
-  }},
-  "matching_skills": ["ONLY skills that appear BOTH in the job description AND in the CV - these are the overlapping skills"],
-  "missing_skills": ["Skills required by the job description that are NOT found in the CV"],
-  "advice": [
-    "tip1",
-    "tip2",
-    "tip3"
+  "domain_match": "good_match | weak_match | complete_mismatch",
+  "requirements": [
+    {{"name": "PostgreSQL", "importance": "must", "status": "partial", "evidence": "optimised MySQL queries"}}
   ],
-  "project_recommendations": [
-    "ONLY projects for skills in missing_skills array",
-    "Example: 'Build X using [missing skill] to demonstrate competency'",
-    "Do NOT recommend projects for skills already in CV"
-  ],
-  "summary": "1-2 sentence summary including domain match status and key takeaway",
-  "score_guide": {{
-    "80-100": "Excellent - strong ATS pass likelihood",
-    "60-79": "Moderate - optimization recommended",
-    "below_60": "Low - significant tailoring needed"
-  }}
-}}
+  "title_alignment": 80,
+  "experience": {{"required_years": 5, "candidate_years": 4}},
+  "education": "met | related | missing | not_required",
+  "project_recommendations": ["..."],
+  "advice": ["..."],
+  "summary": "..."
+}}"""
 
-CRITICAL RULES:
-1. If domain_match is "complete_mismatch", summary MUST state: "Your background in [X] does not align with this [Y] role. We recommend applying for positions matching your [X] expertise."
-2. matching_skills = INTERSECTION of (job requirements AND CV skills) - ONLY skills that the job asks for AND the candidate has
-3. missing_skills = skills required by job description that are NOT found anywhere in the CV
-4. DO NOT put CV skills that are irrelevant to the job in matching_skills (e.g., Python skills for a teaching job)
-5. For complete_mismatch: matching_skills should be empty or only contain soft skills, missing_skills contains job requirements
-6. project_recommendations = ONLY for truly missing skills, NOT for skills already listed
-7. For skills present but without strong evidence, use advice array to suggest better highlighting
-8. Critical keywords (mentioned 3+ times) MUST be highlighted in recommendations
-9. Final score MUST respect domain_match limits (complete=15-29, weak=30-59, good=60-100)
-10. Skill variants count as matches across ALL domains:
-   - Tech: SQL/PostgreSQL/MySQL → "SQL matched", JavaScript/TypeScript → "JS matched"
-   - Healthcare: RN/Registered Nurse/Nursing License → "Nursing matched"
-   - Finance: Excel/Google Sheets/Spreadsheets → "Spreadsheet skills matched"
-   - Education: Teaching/Instruction/Training/Tutoring → "Teaching matched"
-   - Marketing: SEO/SEM/Search Marketing → "Search Marketing matched"
-   - General: Always treat synonyms and related certifications as matching skills
-"""
+        result = self._call_llm(self.ANALYZE_SYSTEM_PROMPT, user_prompt, json_mode=True, temperature=0.2)
 
-        result = self._call_llm(system_prompt, user_prompt, json_mode=True)
-        
-        if result.get("success") and result.get("data"):
-            # Validation Check
-            if result["data"].get("is_valid_cv") is False:
-                # User requested specific static message
-                return {
-                    "success": False,
-                    "error": "The provided document does not appear to be a CV or Resume. Please upload a valid CV or Resume."
+        if not result.get("success") or not result.get("data"):
+            return result
+
+        data = result["data"]
+
+        if data.get("is_valid_cv") is False:
+            return {
+                "success": False,
+                "error": "The provided document does not appear to be a CV or Resume. Please upload a valid CV or Resume."
+            }
+
+        # Discard claimed matches that aren't backed by the CV text
+        cv_norm = _normalize(cv_text)
+        cv_words = _words(cv_norm)
+        requirements = _clean_requirements(data.get("requirements"))
+        unsupported = 0
+        for req in requirements:
+            if req["status"] != "missing" and not _has_evidence(req, cv_norm, cv_words):
+                req["status"] = "missing"
+                req["evidence"] = ""
+                unsupported += 1
+        if unsupported:
+            logger.info(f"🔍 Dropped {unsupported} unsupported skill match(es) during analysis")
+
+        domain_match = data.get("domain_match")
+        if domain_match not in DOMAIN_CAPS:
+            domain_match = "weak_match"
+
+        # Component scores
+        skills_score = _skills_score(requirements)
+        title_score = min(max(_to_number(data.get("title_alignment")) or 50.0, 0), 100)
+        required_years = _to_number((data.get("experience") or {}).get("required_years"))
+        candidate_years = _to_number((data.get("experience") or {}).get("candidate_years"))
+        if not required_years:
+            experience_score = 100.0
+        elif candidate_years is None:
+            experience_score = 50.0
+        else:
+            experience_score = min(100.0, 100 * candidate_years / required_years)
+        education_score = float(EDUCATION_SCORE.get(data.get("education"), 70))
+
+        score = _overall_score(skills_score, title_score, experience_score, education_score, domain_match)
+
+        met = [r["name"] for r in requirements if r["status"] == "met"]
+        unmet = [r["name"] for r in requirements if r["status"] != "met"]
+
+        result["data"] = {
+            "is_valid_cv": True,
+            "domain_match": domain_match,
+            "score": score,
+            "overall_ats_score": score,
+            "requirements": requirements,
+            "matching_skills": met,
+            "missing_skills": unmet,
+            "project_recommendations": data.get("project_recommendations") or [],
+            "advice": data.get("advice") or [],
+            "summary": data.get("summary") or "",
+            "breakdown": {
+                "skills_coverage": round(skills_score),
+                "title_alignment": round(title_score),
+                "experience": round(experience_score),
+                "education": round(education_score),
+                "keyword_match": {
+                    "missing_critical_keywords": [r["name"] for r in requirements
+                                                  if r["status"] == "missing" and r["importance"] == "must"]
                 }
-
-        # Ensure compatibility with frontend by mapping 'overall_ats_score' to 'score'
-        if result.get("success") and result.get("data") and "overall_ats_score" in result["data"]:
-            result["data"]["score"] = result["data"]["overall_ats_score"]
-            
+            }
+        }
+        logger.info(f"📊 Match score {score}% ({domain_match}); {len(met)}/{len(requirements)} requirements met")
         return result
-    
+
+    GENERATE_SYSTEM_PROMPT = """You are an expert CV writer who tailors a candidate's real CV to one job, for both ATS software and human recruiters.
+
+TRUTHFULNESS - this matters more than the score:
+- Keep every role, employer, job title, date, education entry, project and certification from the original CV. Never add, remove or rename one.
+- Never invent numbers, percentages, team sizes, budgets or results. Keep the numbers already in the CV exactly as written. Where a bullet has no number, describe the impact in words instead.
+- Only use a term from the job description if the original CV supports it: the same thing, a clear equivalent, or work that obviously involved it (CV says "Postgres" -> you may write "PostgreSQL"). If the CV shows no evidence of a requirement, leave it out completely and list it in remaining_gaps.
+- Never imply years of experience, seniority, or industry exposure the CV does not show.
+
+TAILORING - rewrite, never copy:
+- Rewrite every bullet in your own words: lead with a strong action verb, and use the job description's terminology wherever it describes the same real work. Do not reproduce the original sentences unchanged.
+- summary: 2-3 sentences saying who the candidate is and their strongest relevant evidence for this job, in the job's own terminology where it is true. Never use "seeking", "looking for", "aspiring", and never name the company or role.
+- skills: keep the candidate's real skills, listing the ones this job asks for first. Group them into 3-5 categories that suit the industry (tech: languages, frameworks, tools, databases, cloud; healthcare: clinical_skills, certifications, systems; finance: analytical, software, certifications).
+- experience: 3-6 bullets per role, most job-relevant first. Each starts with a strong action verb and says what was done, how (tools/methods), and the outcome. 70-180 characters.
+- projects: most relevant first, naming the technologies used and the outcome.
+- Plain text only: no markdown, no emojis, no special symbols.
+- Omit any section key entirely when the original CV has no data for it. Never output empty arrays, nulls or "N/A".
+
+Respond with a single JSON object and nothing else."""
+
     def generate_tailored_cv_json(
         self,
         cv_text: str,
@@ -469,205 +388,125 @@ CRITICAL RULES:
         candidate_name: str = None
     ) -> Dict[str, Any]:
         """
-        Generate a tailored CV in structured JSON format for direct PDF generation
+        Rewrite the CV for one job as structured JSON for PDF generation.
+        The resulting score is recomputed here from the generated content.
         """
-        system_prompt = """You are an expert CV optimization specialist. Your task is to create a highly optimized, ATS-friendly CV in structured JSON format for PDF generation using Python ReportLab.
+        analysis = ats_analysis_json or {}
+        requirements = _clean_requirements(analysis.get("requirements"))
 
-CONTEXT: You will receive ATS scoring results that identified missing keywords, domain match status, and recommendations. Use these insights to optimize the CV.
+        # Tell the writer what the CV proves, and what it must not claim
+        if requirements:
+            def _listing(status):
+                items = [r for r in requirements if r["status"] == status]
+                return "; ".join(f"{r['name']}" + (f" (CV: \"{r['evidence']}\")" if r["evidence"] else "")
+                                 for r in items) or "none"
+            analysis_section = f"""ANALYSIS OF THIS CV AGAINST THIS JOB:
+- Domain match: {analysis.get('domain_match', 'unknown')}
+- Proven by the CV (use this wording where it fits): {_listing('met')}
+- Partly shown (strengthen only what is true): {_listing('partial')}
+- No evidence in the CV - do NOT claim these, list them in remaining_gaps: {', '.join(r['name'] for r in requirements if r['status'] == 'missing') or 'none'}"""
+        else:
+            analysis_section = f"""ANALYSIS OF THIS CV AGAINST THIS JOB:
+- Skills the CV shows: {', '.join(analysis.get('matching_skills', [])) or 'unknown'}
+- Required but not evidenced (do NOT claim these): {', '.join(analysis.get('missing_skills', [])) or 'unknown'}"""
 
-IMPORTANT CONSTRAINTS ABOUT EXPERIENCE AND PROJECTS:
-
-- You must NOT invent or fabricate work experience, job titles, companies, dates, locations, or projects.
-- You must NOT add artificial internships, freelance roles, or side projects not mentioned in the original CV.
-- You must NOT fabricate certifications, degrees, or institutions.
-
-WHEN EXPERIENCE/PROJECTS ARE WEAK OR LIMITED:
-
-- Still optimize wording, structure, and clarity of existing content.
-- Improve bullet points to be more outcome-focused using information already implied or present.
-- Do NOT create new experience sections, projects, or roles to fill space.
-
-HOW TO APPLY OPTIMIZATION:
-
-- Only include roles, projects, and certifications from the original CV.
-- You may:
-  * Reorder projects so most relevant appear first
-  * Merge or split bullets for clarity
-  * Strengthen language around real achievements
-  * Its very important to add all missing keywords from ATS analysis  (if the skill/experience exists but wasn't mentioned)
-- You may NOT:
-  * Add entirely new project entries or roles
-
-If CV is under-experienced for the role, prioritize:
-- Strong, honest Professional Summary highlighting learning mindset and real skills
-- Well-structured Technical Skills section aligned with job description
-- Clear education details and certifications
-
-OPTIMIZATION REQUIREMENTS:
-
-1. Professional Summary:
-   - 2-3 sentences highlighting relevant skills and achievements
-   - CRITICAL: Do NOT use "seeking", "looking for", "aspiring to", "eager to apply", or mention company/role name
-   - State what the candidate IS, not what they WANT
-   - BAD: "Seeking a Software Engineer role at Company X..."
-   - GOOD: "Full-stack developer with 3+ years building scalable web applications using React and Node.js"
-
-2. Skills Section:
-   - REQUIRED: Keep ALL relevant skills from the original CV.
-   - PERMITTED: You MAY add critical missing keywords (e.g. "AWS", "CI/CD") to the list if they are standard for the role, effectively suggesting the user should list them.
-   - BUT: Do NOT invent Experience bullets to support them if the experience is missing. Just list the skill.
-   - Group into categories (Languages, Frameworks, Tools, Databases, Other)
-
-3. Experience Section:
-   - Use strong action verbs: "Engineered", "Optimized", "Architected", "Implemented", "Led"
-   - Add quantifiable achievements with metrics (%, numbers, timeframes)
-   - Incorporate job description keywords naturally
-   - Apply STAR method where possible
-
-4. Keywords:
-   - Strategically place job-specific keywords from ATS analysis
-   - Use 2-3 times throughout (natural distribution)
-   - Include both full forms and acronyms (e.g., "Machine Learning (ML)")
-
-5. ATS Compatibility:
-   - Standard section headings
-   - Clean structure, no complex formatting
-   - Bullet points concise (70-180 characters)
-"""
-
-        # Extract useful data from ATS analysis for the prompt
-        missing_critical = []
-        domain_match = "good_match"
-        if ats_analysis_json:
-            missing_critical = ats_analysis_json.get("breakdown", {}).get("keyword_match", {}).get("missing_critical_keywords", [])
-            domain_match = ats_analysis_json.get("domain_match", "good_match")
-
-        # Build explicit contact info section if provided
+        # Explicit contact details, so the model never invents placeholders
         contact_section = ""
         if contact_info or candidate_name:
-            contact_section = "\n\n4. EXTRACTED CONTACT INFORMATION (USE EXACTLY AS PROVIDED):\n"
+            lines = []
             if candidate_name:
-                contact_section += f"   - Name: {candidate_name}\n"
-            if contact_info:
-                if contact_info.get("email"):
-                    contact_section += f"   - Email: {contact_info['email']}\n"
-                if contact_info.get("phone"):
-                    contact_section += f"   - Phone: {contact_info['phone']}\n"
-                if contact_info.get("linkedin"):
-                    contact_section += f"   - LinkedIn: {contact_info['linkedin']}\n"
-            contact_section += "   IMPORTANT: Use the contact details above EXACTLY. Do NOT use placeholders.\n"
+                lines.append(f"- Name: {candidate_name}")
+            for field in ("email", "phone", "linkedin"):
+                if (contact_info or {}).get(field):
+                    lines.append(f"- {field.capitalize()}: {contact_info[field]}")
+            if lines:
+                contact_section = ("\n\nCONTACT DETAILS (use exactly, never a placeholder):\n" + "\n".join(lines))
 
-        user_prompt = f"""INPUTS PROVIDED:
+        user_prompt = f"""TARGET JOB: {job_title} at {company_name}
 
-1. ATS Scoring Results:
-{str(ats_analysis_json)}
+JOB DESCRIPTION:
+{job_description[:MAX_JD_CHARS]}
 
-2. Current CV:
-{cv_text[:6000]}
-
-3. Target Job:
-{job_title} at {company_name}
-{job_description[:3000]}
+ORIGINAL CV:
+{cv_text[:MAX_CV_CHARS]}
 {contact_section}
 
-TASK: Using the ATS scoring results, optimize the CV to improve the score while maintaining honesty.
+{analysis_section}
 
-Pay special attention to:
-- Missing critical keywords: {', '.join(missing_critical)}
-- Domain match status: {domain_match}
-- Recommendations from scoring analysis
-
-OUTPUT JSON STRUCTURE (STANDARD CV ORDER):
-
+Return JSON in exactly this shape (omit any key with no real data):
 {{
-  "header": {{
-    "name": "Full Name",
-    "email": "email@example.com",
-    "phone": "+XX-XXXXXXXXXX",
-    "location": "City, Country",
-    "linkedin": "LinkedIn URL (only if in original CV)",
-    "github": "GitHub URL (only if in original CV)"
-  }},
-  "summary": "2-3 sentence summary (NO 'seeking' or 'looking for' phrases)",
-  "education": [
-    {{
-      "degree": "Degree Title",
-      "institution": "University Name",
-      "location": "City, Country",
-      "dates": "Month Year - Month Year"
-    }}
-  ],
-  "skills": {{
-    // CHOOSE CATEGORIES BASED ON INDUSTRY. Examples:
-    // Tech: "languages", "frameworks", "tools", "databases", "cloud"
-    // Healthcare: "clinical_skills", "certifications", "software", "languages"
-    // Finance: "analytical", "software", "certifications", "languages"
-    // General: "technical", "software", "certifications", "soft_skills"
-    
-    // Use 3-5 categories that fit the CV's industry. Omit empty categories.
-    "category_name": ["Skill1", "Skill2"]
-  }},
-  "experience": [
-    {{
-      "title": "Job Title",
-      "company": "Company Name",
-      "location": "City, Country",
-      "dates": "Month Year - Month Year",
-      "bullets": [
-        "Achievement with metrics and keywords",
-        "Achievement with quantifiable impact"
-      ]
-    }}
-  ],
-  "projects": [
-    {{
-      "name": "Project Name",
-      "technologies": "Tech1, Tech2",
-      "dates": "Month Year",
-      "description": "Description with impact and relevant technologies"
-    }}
-  ],
-  "certifications": [
-    {{
-      "name": "Certification Name",
-      "issuer": "Issuer Organization",
-      "year": "Year/Date"
-    }}
-  ],
-  "improvement_report": {{
-    "original_score": "Value from input",
-    "new_score": "Estimated new score (0-100) after adding missing keywords",
-    "skills_added": ["List of skills you successfully added to the CV"],
-    "remaining_gaps": ["List of skills/experience you could NOT add (e.g. requires specific project experience)"]
-  }}
-}}
+  "header": {{"name": "", "email": "", "phone": "", "location": "", "linkedin": "", "github": ""}},
+  "summary": "",
+  "education": [{{"degree": "", "institution": "", "location": "", "dates": ""}}],
+  "skills": {{"category_name": ["Skill1", "Skill2"]}},
+  "experience": [{{"title": "", "company": "", "location": "", "dates": "", "bullets": ["", ""]}}],
+  "projects": [{{"name": "", "technologies": "", "dates": "", "description": ""}}],
+  "certifications": [{{"name": "", "issuer": "", "year": ""}}],
+  "improvement_report": {{"remaining_gaps": ["requirements you could not honestly include"]}}
+}}"""
 
-CRITICAL: HANDLING MISSING INFORMATION
-- If original CV lacks a section, COMPLETELY OMIT that key
-- NO empty arrays [], null values, or "N/A" placeholders
-- Only include keys with real data
+        result = self._call_llm(self.GENERATE_SYSTEM_PROMPT, user_prompt, json_mode=True, temperature=0.4)
 
-CRITICAL: CONSISTENCY CHECK
-- Any skill listed in "skills_added" inside "improvement_report" MUST also be present in the relevant category within the "skills" object.
-- Do NOT list a skill as added if you did not actually insert it into the CV content.
-- If you cannot fit a skill naturally, do not list it as added.
+        if result.get("success") and result.get("data"):
+            self._finalize_cv(result["data"], cv_text, analysis, requirements)
 
-SCORING RULES:
-- If "missing_critical_keywords" was empty and you have optimized the phrasing/formatting, the new_score MUST be very high (95-100).
-- Only deduct points if there are genuine gaps you could not fill.
-
-Begin optimization now."""
-
-        result = self._call_llm(system_prompt, user_prompt, json_mode=True)
-        
-        # Ensure compatibility with frontend
-        if result.get("success") and result.get("data") and ats_analysis_json:
-             # Inject the gap analysis summary for legacy frontend support
-             old_score = ats_analysis_json.get('overall_ats_score', 0)
-             new_score = result['data'].get('improvement_report', {}).get('new_score', 'N/A')
-             result["data"]["gap_analysis"] = f"Optimization Complete. Score improved from {old_score}% to {new_score}%."
-             
         return result
+
+    def _finalize_cv(self, data: Dict[str, Any], cv_text: str, analysis: Dict[str, Any],
+                     requirements: List[Dict[str, Any]]) -> None:
+        """Strip unsupported skills, then recompute the score from what the CV now says"""
+        cv_norm = _normalize(cv_text)
+
+        # Drop any skill the analysis found no evidence for and the original CV never mentions
+        unsupported = {_normalize(r["name"]) for r in requirements
+                       if r["status"] == "missing" and not _mentions(cv_norm, r["name"])}
+        removed = []
+        skills = data.get("skills")
+        if unsupported and isinstance(skills, dict):
+            for category, items in list(skills.items()):
+                if not isinstance(items, list):
+                    continue
+                kept = [i for i in items if not (isinstance(i, str) and _normalize(i) in unsupported)]
+                removed += [i for i in items if isinstance(i, str) and _normalize(i) in unsupported]
+                if kept:
+                    skills[category] = kept
+                else:
+                    del skills[category]
+        if removed:
+            logger.info(f"✂️  Removed {len(removed)} unevidenced skill(s) from the tailored CV: {', '.join(removed)}")
+
+        if not requirements:
+            return
+
+        # Anything the tailored CV now states counts as present for ATS keyword matching
+        generated_norm = _normalize(json.dumps({k: v for k, v in data.items()
+                                                if k not in ("improvement_report", "header")}))
+        added = []
+        for req in requirements:
+            if req["status"] != "met" and _mentions(generated_norm, req["name"]):
+                req["status"] = "met"
+                added.append(req["name"])
+
+        breakdown = analysis.get("breakdown") or {}
+        new_score = _overall_score(
+            _skills_score(requirements),
+            float(breakdown.get("title_alignment", 50)),
+            float(breakdown.get("experience", 50)),
+            float(breakdown.get("education", 70)),
+            analysis.get("domain_match", "weak_match")
+        )
+        old_score = analysis.get("overall_ats_score") or analysis.get("score") or 0
+
+        report = data.get("improvement_report") if isinstance(data.get("improvement_report"), dict) else {}
+        report["original_score"] = old_score
+        report["new_score"] = new_score
+        report["skills_added"] = added
+        report.setdefault("remaining_gaps", [])
+        if requirements:
+            report["remaining_gaps"] = [r["name"] for r in requirements if r["status"] != "met"]
+        data["improvement_report"] = report
+        data["gap_analysis"] = f"Optimization complete. Score improved from {old_score}% to {new_score}%."
+        logger.info(f"📈 Tailored CV score {old_score}% -> {new_score}% ({len(added)} keyword(s) added)")
 
 # Singleton instance
 ai_service = AIService()

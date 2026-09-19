@@ -1,42 +1,67 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
 import {
     Brain,
-    CheckCircle,
+    Check,
+    CheckCircle2,
     AlertCircle,
     Sparkles,
-    Loader2,
     Coffee,
     FileText,
-    Hammer,
-    RotateCcw
+    ShieldCheck,
+    X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import JobSearch from './components/JobSearch';
-import JobList from './components/JobList';
+import JobList, { JobListSkeleton } from './components/JobList';
 import CVAnalysis from './components/CVAnalysis';
 import DocumentPreview from './components/DocumentPreview';
-import Background3D from './components/Background3D';
-import GenerationProgress from './components/GenerationProgress'; // Added this import based on the instruction's intent
+import GenerationProgress from './components/GenerationProgress';
 import AboutUs from './components/AboutUs';
-import ReviewsPage from './components/ReviewsPage';
+import ErrorMessage, { SUPPORT_URL } from './components/ErrorMessage';
 
 const API_BASE = '/api';
 
-// Generation Progress Component
-// Moved to its own file, but keeping the definition here for context if it's not yet moved.
-// If GenerationProgress is imported from './components/GenerationProgress', this local definition should be removed.
-// Assuming for now it's still defined here and the import instruction was a hint for future refactoring or a mistake.
-// Based on the instruction's "Code Edit" snippet, it seems the user intended to import it.
-// I will remove the local definition and assume it's imported.
-// Generation Progress Component
-// Moved to its own file.
+// Read the error message from a failed API response. The body can be empty or
+// not JSON (e.g. when the backend isn't running behind the Vite proxy).
+async function readError(response, fallback) {
+    const data = await response.json().catch(() => null);
+    if (typeof data?.detail === 'string') return data.detail;
+    if (!data && response.status >= 500) return 'Could not reach the server. Please make sure it is running and try again.';
+    return fallback;
+}
 
+const STEPS = [
+    { id: 'search', label: 'Choose a job' },
+    { id: 'analysis', label: 'Analyze fit' },
+    { id: 'preview', label: 'Tailored CV' }
+];
 
+function Stepper({ current }) {
+    const currentIndex = STEPS.findIndex(s => s.id === current);
+
+    return (
+        <ol className="stepper" aria-label="Progress">
+            {STEPS.map((step, i) => (
+                <Fragment key={step.id}>
+                    {i > 0 && <li className="step-sep" aria-hidden="true" />}
+                    <li
+                        className={`step ${i < currentIndex ? 'done' : ''} ${i === currentIndex ? 'current' : ''}`}
+                        aria-current={i === currentIndex ? 'step' : undefined}
+                    >
+                        <span className="step-index">{i < currentIndex ? <Check size={13} strokeWidth={3} /> : i + 1}</span>
+                        <span className="step-label">{step.label}</span>
+                    </li>
+                </Fragment>
+            ))}
+        </ol>
+    );
+}
 
 function App() {
     // Application state
-    // Steps: 'search', 'analysis', 'preview'
+    // Steps: 'search', 'analysis', 'preview', plus the 'about' page
     const [currentStep, setCurrentStep] = useState('search');
+    const [returnStep, setReturnStep] = useState('search'); // Where About's "Back" returns to
 
     // Data states
     const [jobs, setJobs] = useState([]);
@@ -52,6 +77,31 @@ function App() {
     const [searchKey, setSearchKey] = useState(0); // Add key to force reset JobSearch
     const [postedFilter, setPostedFilter] = useState('all'); // Lifted state for persistence
     const [hasSearched, setHasSearched] = useState(false);
+    const [scoreBefore, setScoreBefore] = useState(null); // Match score before tailoring
+    const jobDescriptions = useRef(new Map()); // job id -> promise of its full description
+
+    // Search results only carry a short snippet, so fetch the full ad for the AI steps
+    const ensureFullDescription = useCallback((job) => {
+        const snippet = job?.description || '';
+        if (!job?.id) return Promise.resolve(snippet);
+
+        if (!jobDescriptions.current.has(job.id)) {
+            const request = fetch(`${API_BASE}/jobs/${job.id}`)
+                .then(res => (res.ok ? res.json() : null))
+                .then(data => {
+                    const full = data?.job?.description || '';
+                    return full.length > snippet.length ? full : snippet;
+                })
+                .catch(() => snippet); // A Reed hiccup shouldn't block the flow
+            jobDescriptions.current.set(job.id, request);
+        }
+        return jobDescriptions.current.get(job.id);
+    }, []);
+
+    // Start each step/page at the top
+    useEffect(() => {
+        window.scrollTo(0, 0);
+    }, [currentStep]);
 
     // Handle job search
     // Initial load - fetch default jobs
@@ -91,8 +141,7 @@ function App() {
             const response = await fetch(`${API_BASE}/jobs/search?${params}`);
 
             if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.detail || 'Failed to search jobs');
+                throw new Error(await readError(response, 'Failed to search jobs'));
             }
 
             const data = await response.json();
@@ -106,9 +155,10 @@ function App() {
 
     // Handle job selection
     const handleSelectJob = useCallback((job) => {
+        ensureFullDescription(job); // Prefetch while the user picks their CV file
         setSelectedJob(job);
         setCurrentStep('analysis');
-    }, []);
+    }, [ensureFullDescription]);
 
     // Handle CV Analysis (Upload + Analyze)
     const handleAnalysis = useCallback(async (file, job) => {
@@ -118,6 +168,8 @@ function App() {
         formData.append('file', file);
 
         try {
+            const jobDescription = await ensureFullDescription(job);
+
             // 1. Upload CV
             const uploadRes = await fetch(`${API_BASE}/cv/upload`, {
                 method: 'POST',
@@ -125,8 +177,7 @@ function App() {
             });
 
             if (!uploadRes.ok) {
-                const err = await uploadRes.json();
-                throw new Error(err.detail || 'Failed to upload CV');
+                throw new Error(await readError(uploadRes, 'Failed to upload CV'));
             }
 
             const uploadData = await uploadRes.json();
@@ -139,14 +190,13 @@ function App() {
                 body: JSON.stringify({
                     cv_id: uploadData.cv_id,
                     job_title: job.title,
-                    job_description: job.description,
+                    job_description: jobDescription,
                     company_name: job.company
                 })
             });
 
             if (!analyzeRes.ok) {
-                const err = await analyzeRes.json();
-                throw new Error(err.detail || 'Analysis failed');
+                throw new Error(await readError(analyzeRes, 'Analysis failed'));
             }
 
             const analyzeData = await analyzeRes.json();
@@ -161,7 +211,7 @@ function App() {
             // setError(err.message); // Lets CVAnalysis handle the error locally
             throw err;
         }
-    }, []);
+    }, [ensureFullDescription]);
 
     // Generate optimized CV
     const handleOptimize = useCallback(async () => {
@@ -173,6 +223,8 @@ function App() {
         setCurrentStep('preview');
 
         try {
+            const jobDescription = await ensureFullDescription(selectedJob);
+
             // Generate PDF directly
             const response = await fetch(`${API_BASE}/cv/generate/pdf`, {
                 method: 'POST',
@@ -180,15 +232,14 @@ function App() {
                 body: JSON.stringify({
                     cv_id: cvData.cv_id,
                     job_title: selectedJob.title,
-                    job_description: selectedJob.description,
+                    job_description: jobDescription,
                     company_name: selectedJob.company,
                     ats_analysis: analysisResult
                 })
             });
 
             if (!response.ok) {
-                const err = await response.json().catch(() => ({ detail: 'Failed to generate PDF' }));
-                throw new Error(err.detail || 'Failed to generate PDF');
+                throw new Error(await readError(response, 'Failed to generate PDF'));
             }
 
             // Extract improvement metrics from headers
@@ -197,6 +248,7 @@ function App() {
 
             if (newScoreHeader) {
                 const newScore = parseInt(newScoreHeader, 10);
+                setScoreBefore(analysisResult?.score ?? null);
                 const addedSkills = skillsAddedHeader ? skillsAddedHeader.split(',').map(s => s.trim()) : [];
 
                 // Update analysis result to reflect optimization
@@ -237,7 +289,7 @@ function App() {
         } finally {
             setLoading(false);
         }
-    }, [cvData, selectedJob, analysisResult]);
+    }, [cvData, selectedJob, analysisResult, ensureFullDescription]);
 
     // Generate cover letter
     const handleGenerateCoverLetter = useCallback(async () => {
@@ -260,8 +312,7 @@ function App() {
             });
 
             if (!response.ok) {
-                const err = await response.json().catch(() => ({ detail: 'Failed to generate cover letter' }));
-                throw new Error(err.detail || 'Failed to generate cover letter');
+                throw new Error(await readError(response, 'Failed to generate cover letter'));
             }
 
             const blob = await response.blob();
@@ -309,6 +360,7 @@ function App() {
         setJobs([]);
         setSelectedJob(null);
         setGeneratedDocs({ cv: null, coverLetter: null });
+        setScoreBefore(null);
         setCurrentStep('search');
         setError(null);
         setSearchKey(prev => prev + 1); // Force re-mount of JobSearch
@@ -320,201 +372,90 @@ function App() {
         setSelectedJob(null);
         setAnalysisResult(null);
         setCvData(null);
-        setAnalysisResult(null);
-        setCvData(null);
         setCurrentStep('search');
     }, []);
 
-    // 6. About Us View
-    if (currentStep === 'about') {
-        return (
-            <div className="app">
-                <Background3D />
-                <main className="main-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '2rem' }}>
-                    <AboutUs onBack={handleBackToSearch} onNavigateToReviews={() => setCurrentStep('reviews')} />
-                </main>
-            </div>
-        );
-    }
+    // The About page remembers the step it was opened from
+    const openAbout = useCallback(() => {
+        if (currentStep !== 'about') setReturnStep(currentStep);
+        setCurrentStep('about');
+    }, [currentStep]);
 
-    // 7. Reviews View
-    if (currentStep === 'reviews') {
-        return (
-            <div className="app">
-                <Background3D />
-                <main className="main-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '2rem' }}>
-                    <ReviewsPage onBack={handleBackToSearch} />
-                </main>
-            </div>
-        );
-    }
+    const handleClosePage = useCallback(() => {
+        setCurrentStep(returnStep);
+    }, [returnStep]);
+
+    const isContentPage = currentStep === 'about';
 
     return (
         <div className="app">
-            <Background3D />
-
             {/* Header */}
-            <header style={{
-                padding: '2rem 3rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                position: 'relative',
-                zIndex: 10
-            }}>
-                <div onClick={handleReset} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <Brain size={64} color="var(--color-primary)" />
-                    <div>
-                        <h1 style={{
-                            fontSize: '2.2rem',
-                            fontWeight: 800,
-                            margin: 0,
-                            background: 'linear-gradient(to right, #fff, var(--color-primary-light))',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            backgroundClip: 'text',
-                            letterSpacing: '-0.02em',
-                            lineHeight: 1.2
-                        }}>NeuroArc</h1>
-                        <p style={{
-                            margin: 0,
-                            color: 'var(--color-text-muted)',
-                            fontSize: '1.1rem',
-                            fontWeight: 500
-                        }}>AI Career Architect</p>
-                    </div>
-                </div>
+            <header className="app-header">
+                <div className="container header-inner">
+                    <button className="brand" onClick={handleReset} aria-label="NeuroArc home">
+                        <span className="brand-mark"><Brain size={22} /></span>
+                        <span className="brand-name">NeuroArc</span>
+                        <span className="brand-tag">AI Career Architect</span>
+                    </button>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <nav className="header-nav" aria-label="Main">
+                        <button className={`nav-link ${currentStep === 'about' ? 'active' : ''}`} onClick={openAbout}>
+                            About
+                        </button>
+                    </nav>
                 </div>
             </header>
 
             {/* Main Content */}
-            <main className="main" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                {/* Steps Indicator */}
-                {/* Dynamic Step Indicator */}
-                {/* Dynamic Step Indicator - Visuals Hidden, kept for spacing */}
-                {/* Dynamic Step Indicator - Visuals Hidden, kept for spacing */}
-                <div className="steps-container" style={{
-                    marginBottom: currentStep === 'search' ? '11rem' : '2rem',
-                    height: '80px',
-                    visibility: 'hidden',
-                    transition: 'margin-bottom 0.5s ease-in-out'
-                }}>
-                    {/* Visual elements removed to rely on 3D background */}
-                </div>
-
-                {/* Error Alert */}
+            <main className="main">
+                {/* Error Toast */}
                 <AnimatePresence>
-                    {error && currentStep !== 'analysis' && (
+                    {error && currentStep !== 'analysis' && !isContentPage && (
                         <motion.div
-                            initial={{ opacity: 0, y: -50, x: '-50%' }}
+                            role="alert"
+                            className="alert alert-error toast"
+                            initial={{ opacity: 0, y: -8, x: '-50%' }}
                             animate={{ opacity: 1, y: 0, x: '-50%' }}
-                            exit={{ opacity: 0, y: -50, x: '-50%' }}
-                            className="alert"
-                            style={{
-                                position: 'fixed',
-                                top: '2rem',
-                                left: '50%',
-                                transform: 'translateX(-50%)',
-                                zIndex: 100,
-                                width: 'auto',
-                                maxWidth: '90%',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '1rem',
-                                padding: '1rem 1.5rem',
-                                background: 'rgba(23, 23, 23, 0.95)',
-                                backdropFilter: 'blur(12px)',
-                                border: '1px solid var(--color-error)',
-                                borderRadius: '12px',
-                                boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
-                                color: 'var(--color-text-primary)'
-                            }}
+                            exit={{ opacity: 0, y: -8, x: '-50%' }}
                         >
-                            <AlertCircle size={24} color="var(--color-error)" />
-                            {error.includes('buymeacoffee') ? (
-                                <span style={{ fontSize: '0.95rem' }}>
-                                    Server is busy due to high demand. Please help keep the servers running — {' '}
-                                    <a
-                                        href="https://buymeacoffee.com/manojthapa"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        style={{ color: 'var(--color-warning)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.25rem', textDecoration: 'none' }}
-                                    >
-                                        <Coffee size={16} /> Buy me a coffee
-                                    </a>
-                                </span>
-                            ) : (
-                                <span>{error}</span>
-                            )}
-                            <button
-                                onClick={() => setError(null)}
-                                style={{
-                                    marginLeft: '1rem',
-                                    background: 'none',
-                                    border: 'none',
-                                    color: 'var(--color-text-muted)',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    padding: '4px',
-                                    borderRadius: '50%',
-                                    transition: 'all 0.2s'
-                                }}
-                                onMouseEnter={(e) => { e.currentTarget.style.color = 'white'; e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.background = 'none'; }}
-                            >
-                                ×
+                            <AlertCircle size={18} />
+                            <div className="alert-body">
+                                <ErrorMessage message={error} />
+                            </div>
+                            <button className="alert-close" onClick={() => setError(null)} aria-label="Dismiss">
+                                <X size={16} />
                             </button>
                         </motion.div>
                     )}
                 </AnimatePresence>
 
+                {(currentStep === 'analysis' || currentStep === 'preview') && <Stepper current={currentStep} />}
+
                 <AnimatePresence mode="wait">
+                    {/* About */}
+                    {currentStep === 'about' && (
+                        <motion.div key="about" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+                            <AboutUs onBack={handleClosePage} />
+                        </motion.div>
+                    )}
+
                     {/* Step 1: Job Search */}
                     {currentStep === 'search' && (
-                        <motion.div
-                            key="search"
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -20 }}
-                            transition={{ duration: 0.5 }}
-                        >
-                            <div style={{ marginBottom: '3rem', textAlign: 'center' }}>
-                                <h1 className="hero-title">Find Your Next Role</h1>
-                                <p className="hero-subtitle">Search for jobs, analyze your fit, and get a tailored application in seconds.</p>
-                            </div>
+                        <motion.div key="search" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+                            <section className="page-hero">
+                                <span className="eyebrow"><Sparkles size={14} /> AI-powered job application assistant</span>
+                                <h1 className="hero-title">Find your next role</h1>
+                                <p className="hero-subtitle">
+                                    Search live UK jobs, see how well your CV matches, and generate a tailored, ATS-friendly CV in seconds.
+                                </p>
+                            </section>
 
                             <JobSearch key={searchKey} onSearch={handleJobSearch} loading={loading} />
 
-                            {/* Loading Animation for Job Search */}
-                            {loading && currentStep === 'search' && (
-                                <motion.div
-                                    className="loading"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    style={{
-                                        marginTop: '3rem',
-                                        textAlign: 'center',
-                                        minHeight: '50vh',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        justifyContent: 'center',
-                                        alignItems: 'center'
-                                    }}
-                                >
-                                    <Loader2 size={64} className="spinner" />
-                                    <h2 className="hero-title" style={{ marginTop: '1.5rem', fontSize: '2.5rem' }}>Looking for jobs...</h2>
-                                </motion.div>
-                            )}
-
-                            {!loading && (
-                                <motion.div
-                                    style={{ marginTop: '2rem' }}
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                >
+                            <section className="results">
+                                {loading ? (
+                                    <JobListSkeleton />
+                                ) : (
                                     <JobList
                                         jobs={jobs}
                                         selectedJob={selectedJob}
@@ -524,20 +465,14 @@ function App() {
                                         setPostedFilter={setPostedFilter}
                                         hasSearched={hasSearched}
                                     />
-                                </motion.div>
-                            )}
+                                )}
+                            </section>
                         </motion.div>
                     )}
 
                     {/* Step 2: CV Analysis */}
                     {currentStep === 'analysis' && selectedJob && (
-                        <motion.div
-                            key="analysis"
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: -20 }}
-                            transition={{ duration: 0.5 }}
-                        >
+                        <motion.div key="analysis" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
                             <CVAnalysis
                                 job={selectedJob}
                                 onAnalyze={handleAnalysis}
@@ -550,79 +485,21 @@ function App() {
 
                     {/* Step 3: Preview & Apply */}
                     {currentStep === 'preview' && (
-                        <motion.div
-                            key="preview"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                        >
+                        <motion.div key="preview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
                             {loading ? (
-                                <div className="loading" style={{ textAlign: 'center', padding: '0', perspective: '1000px', marginTop: '3rem', minHeight: '50vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-                                    {/* 3D Renovation Animation */}
-                                    <div style={{ position: 'relative' }}>
-                                        <motion.div
-                                            animate={{ rotateY: 360 }}
-                                            transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <FileText size={80} color="var(--color-primary)" strokeWidth={1.5} />
-                                        </motion.div>
-                                        <motion.div
-                                            animate={{ y: [-5, 5, -5] }}
-                                            transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                                            style={{
-                                                position: 'absolute',
-                                                bottom: -10,
-                                                right: -25
-                                            }}
-                                        >
-                                            <Hammer size={36} color="var(--color-primary)" />
-                                        </motion.div>
-                                    </div>
+                                <div className="card progress-panel fade-in">
+                                    <div className="progress-panel-icon"><FileText size={22} /></div>
+                                    <h2>Tailoring your CV</h2>
+                                    <p>For {selectedJob?.title} at {selectedJob?.company}</p>
                                     <GenerationProgress type="cv" />
                                 </div>
                             ) : (
-                                <div>
-                                    <div className="card fade-in" style={{
-                                        marginBottom: '2rem',
-                                        background: 'rgba(16, 185, 129, 0.1)',
-                                        border: '1px solid rgba(16, 185, 129, 0.3)',
-                                        padding: '1.5rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '1.5rem',
-                                        boxShadow: '0 8px 32px rgba(16, 185, 129, 0.15)',
-                                        position: 'relative',
-                                        overflow: 'hidden'
-                                    }}>
-                                        <div style={{
-                                            width: '4px',
-                                            height: '100%',
-                                            background: 'var(--color-success)',
-                                            position: 'absolute',
-                                            left: 0,
-                                            top: 0
-                                        }}></div>
-                                        <div style={{
-                                            background: 'var(--color-success)',
-                                            borderRadius: '50%',
-                                            width: '48px',
-                                            height: '48px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            flexShrink: 0,
-                                            boxShadow: '0 0 20px rgba(16, 185, 129, 0.4)'
-                                        }}>
-                                            <CheckCircle size={28} color="#050b14" strokeWidth={3} />
-                                        </div>
-                                        <div>
-                                            <h3 style={{ margin: 0, color: 'var(--color-success)', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                Optimization Complete! <Sparkles size={18} />
-                                            </h3>
-                                            <p style={{ margin: '0.25rem 0 0', color: 'var(--color-text-primary)' }}>
-                                                Your documents are ready for <strong style={{ color: 'white' }}>{selectedJob?.title}</strong> at {selectedJob?.company}.
-                                            </p>
+                                <>
+                                    <div className="alert alert-success fade-in" style={{ marginBottom: '1rem' }}>
+                                        <CheckCircle2 size={20} />
+                                        <div className="alert-body">
+                                            <div className="alert-title">Your tailored CV is ready</div>
+                                            Optimized for {selectedJob?.title} at {selectedJob?.company}. Review it below, then download and apply.
                                         </div>
                                     </div>
 
@@ -632,67 +509,33 @@ function App() {
                                         isPdf={generatedDocs.isPdf}
                                         onDownloadCV={handleDownloadCV}
                                         analysisResult={analysisResult}
+                                        scoreBefore={scoreBefore}
                                         job={selectedJob}
                                         onBack={handleBackToSearch}
                                     />
-                                </div>
+                                </>
                             )}
                         </motion.div>
                     )}
                 </AnimatePresence>
             </main>
 
-            {/* Footer - hidden on preview step */}
-            {
-                currentStep !== 'preview' && <footer className="footer-responsive">
-                    {/* Left: About Us */}
-                    {/* Left: Footer Links */}
-                    <div className="footer-left" style={{ display: 'flex', gap: '1.5rem' }}>
-                        <a
-                            href="#"
-                            onClick={(e) => { e.preventDefault(); setCurrentStep('about'); }}
-                            style={{ color: 'var(--color-text-muted)', textDecoration: 'none', fontWeight: 600, opacity: 0.8 }}
-                        >
-                            About Us
+            {/* Footer */}
+            <footer className="site-footer">
+                <div className="container footer-inner">
+                    <span>&copy; {new Date().getFullYear()} NeuroArc</span>
+                    <span className="footer-privacy">
+                        <ShieldCheck size={14} /> No data is stored. CVs are processed in memory only.
+                    </span>
+                    <nav className="footer-links" aria-label="Footer">
+                        <button onClick={openAbout}>About</button>
+                        <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
+                            <Coffee size={14} /> Support
                         </a>
-                        <a
-                            href="#"
-                            onClick={(e) => { e.preventDefault(); setCurrentStep('reviews'); }}
-                            style={{ color: 'var(--color-text-muted)', textDecoration: 'none', fontWeight: 600, opacity: 0.8 }}
-                        >
-                            Reviews
-                        </a>
-                    </div>
-
-                    {/* Center: Copyright */}
-                    <div className="footer-center">
-                        <p style={{ color: 'var(--color-text-muted)', margin: 0, opacity: 0.8, fontWeight: 600 }}>
-                            &copy; NeuroArc 2025
-                        </p>
-
-                        <p style={{ color: 'var(--color-text-muted)', margin: 0, opacity: 0.8, fontSize: '0.8rem' }}>
-                            Privacy Notice: No data is stored. All CV analysis and optimization are processed in-memory.
-                        </p>
-                    </div>
-
-                    {/* Right: BMC */}
-                    <div className="footer-right">
-                        <div className="tooltip-container footer-bmc">
-                            <a href="https://www.buymeacoffee.com/manojthapa" target="_blank" rel="noopener noreferrer">
-                                <img
-                                    src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png"
-                                    alt="Buy Me A Coffee"
-                                    style={{ height: '32px', width: 'auto' }}
-                                />
-                            </a>
-                            <span className="tooltip-text">Support Manoj</span>
-                        </div>
-                    </div>
-                </footer>
-            }
-
-
-        </div >
+                    </nav>
+                </div>
+            </footer>
+        </div>
     );
 }
 
