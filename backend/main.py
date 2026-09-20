@@ -79,7 +79,7 @@ if os.path.exists(frontend_dist):
     @app.middleware("http")
     async def spa_middleware(request: Request, call_next):
         # Allow API calls to pass through
-        if request.url.path.startswith("/api") or request.url.path.startswith("/docs") or request.url.path.startswith("/openapi.json"):
+        if request.url.path.startswith(("/api", "/docs", "/openapi.json", "/health")):
             return await call_next(request)
             
         # Try to serve static file if it exists directly (e.g., favicon.svg)
@@ -109,15 +109,25 @@ else:
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint with dependency status"""
-    groq_api_key = bool(os.getenv("GROQ_API_KEY", ""))
+    """Health check with dependency status - useful for debugging a deployment"""
+    from services.ai_service import ai_service
+
+    key = ai_service.api_key
     reed_api_key = bool(os.getenv("REED_API_KEY", ""))
-    
+
     return {
         "status": "healthy",
         "dependencies": {
-            "ai_service": "available" if groq_api_key else "unavailable (no GROQ_API_KEY)",
+            "ai_service": "available" if key else "unavailable (no GROQ_API_KEY)",
             "job_search": "available" if reed_api_key else "mock mode (no REED_API_KEY)"
+        },
+        "ai": {
+            "key_configured": bool(key),
+            # Never return the key itself, just enough to spot a bad paste
+            "key_looks_valid": bool(key) and key.startswith("gsk_") and len(key) > 40,
+            "key_length": len(key),
+            "models": ai_service.models,
+            "last_error": ai_service.last_error
         }
     }
 
