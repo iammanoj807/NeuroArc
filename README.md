@@ -88,6 +88,50 @@ Add these as **Secrets** in your Space settings (never commit them):
 
 ---
 
+## 🛡️ Truthfulness guard — measured
+
+The guard stops the model claiming skills your CV does not support. It is
+deterministic code, so `eval/` measures it directly against labelled cases
+rather than by generating CVs and counting what came out — no API calls, runs in
+seconds, and it yields a **false-negative count**, which is the number that
+matters: a miss puts a false claim on a CV a human then sends to an employer.
+
+```bash
+python eval/test_truthfulness_guard.py
+```
+
+### Results
+
+| | Before | After |
+|---|---|---|
+| Unsupported claims blocked | 10/15 (66.7%) | **20/20 (100%)** |
+| Genuine skills kept | 15/15 | **16/16** |
+| False claims that survived | 5 | **0** |
+
+### Two laundering routes, found and closed
+
+`_has_evidence` checked that the quoted evidence came from the CV, but never
+that it was **about the claimed skill**. Any genuine CV sentence therefore
+laundered any skill:
+
+> Claiming **Azure**, quoting *"Owned production REST API services end to end"* —
+> scored 1.00 on word overlap, because every word of it really is in the CV.
+
+Requiring a contiguous CV span *alone* is worse (15/20): the laundering evidence
+is copied verbatim, so contiguity passes it. Both bars together hold — the
+evidence must be copied from the CV **and** name the skill it proves.
+
+A second route: the skill-token filter inherited a `len > 2` rule from the
+evidence-word filter, which made `Go`, `R` and `C#` impossible to evidence. A CV
+saying "Golang" could never support a "Go" requirement.
+
+### Honest limits
+
+- **36 hand-built cases**, 20 written to be adversarial. 100% means no failures
+  on these cases, not a perfect guard. Two routes were found; a third may exist.
+- The case set lives in `eval/guard_cases.py`. Add to it rather than trusting the
+  headline number.
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please fork the repository and submit a Pull Request.
