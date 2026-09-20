@@ -1,0 +1,47 @@
+[
+  {
+    "label": "Original set",
+    "n_cases": 30,
+    "n_unsupported": 15,
+    "n_supported": 15,
+    "blocked_correctly": 15,
+    "kept_correctly": 15,
+    "missed": 0,
+    "false_blocks": 0,
+    "recall_pct": 100.0,
+    "precision_pct": 100.0,
+    "accuracy_pct": 100.0,
+    "miss_detail": [],
+    "false_block_detail": []
+  },
+  {
+    "label": "Extra set (short names, fabricated evidence)",
+    "n_cases": 6,
+    "n_unsupported": 5,
+    "n_supported": 1,
+    "blocked_correctly": 5,
+    "kept_correctly": 1,
+    "missed": 0,
+    "false_blocks": 0,
+    "recall_pct": 100.0,
+    "precision_pct": 100.0,
+    "accuracy_pct": 100.0,
+    "miss_detail": [],
+    "false_block_detail": []
+  },
+  {
+    "label": "Combined",
+    "n_cases": 36,
+    "n_unsupported": 20,
+    "n_supported": 16,
+    "blocked_correctly": 20,
+    "kept_correctly": 16,
+    "missed": 0,
+    "false_blocks": 0,
+    "recall_pct": 100.0,
+    "precision_pct": 100.0,
+    "accuracy_pct": 100.0,
+    "miss_detail": [],
+    "false_block_detail": []
+  }
+]

@@ -42,11 +42,38 @@ def _mentions(text_norm: str, phrase: str) -> bool:
 
 
 def _has_evidence(req: Dict[str, Any], cv_norm: str, cv_words: set) -> bool:
-    """Check the model's claimed evidence actually exists in the CV"""
+    """Check the model's claimed evidence is really in the CV AND is about the
+    claimed skill.
+
+    The skill named anywhere in the CV settles it. Otherwise the quoted evidence
+    must clear two bars, because either one alone is exploitable:
+
+    1. It must appear in the CV as a contiguous phrase. The prompt asks the model
+       to copy an exact phrase, so anything looser lets it assemble a sentence
+       out of real CV vocabulary -- "backend services written in Go" scores 0.67
+       on word overlap against a CV that only ever says Java.
+    2. It must share a word with the skill it claims to prove. Without this, any
+       genuine CV sentence launders any skill: claiming Azure while quoting
+       "Owned production REST API services end to end" is a perfect copy of the
+       CV and proves nothing about Azure.
+
+    No length filter on the skill tokens, unlike the evidence words elsewhere:
+    a skill name is meaningful at any length, and filtering short tokens would
+    make "Go", "R" and "C#" impossible to evidence.
+
+    Measured in eval/: recall 66.7% with neither bar, 100% with both, and no
+    genuinely evidenced skill dropped in either case.
+    """
     if _mentions(cv_norm, req["name"]):
         return True
-    words = [w.strip(".") for w in _normalize(req.get("evidence", "")).split() if len(w.strip(".")) > 2]
-    return bool(words) and sum(w in cv_words for w in words) / len(words) >= 0.6
+
+    ev_norm = _normalize(req.get("evidence", ""))
+    if not ev_norm or ev_norm not in cv_norm:
+        return False
+
+    skill_words = {w.strip(".") for w in _normalize(req["name"]).split() if w.strip(".")}
+    ev_words = {w.strip(".") for w in ev_norm.split() if w.strip(".")}
+    return bool(skill_words & ev_words)
 
 
 def _clean_requirements(raw: Any) -> List[Dict[str, Any]]:
@@ -93,7 +120,10 @@ class AIService:
     """Service for AI-powered CV tailoring"""
     
     def __init__(self):
-        self.api_key = os.getenv("GROQ_API_KEY", "")
+        # Secrets pasted into hosting dashboards often carry a trailing newline or
+        # space, which makes every request fail before it is sent
+        self.api_key = os.getenv("GROQ_API_KEY", "").strip().strip('"\'')
+        self.last_error = None  # Surfaced by /health for debugging deployments
         self.endpoint = "https://api.groq.com/openai/v1/chat/completions"
         # Priority list: Try best model first, then fallback
         # (each model has its own rate limit, so falling back also spreads load)
@@ -103,6 +133,8 @@ class AIService:
             logger.warning("⚠️ GROQ_API_KEY not found. AI features will be unavailable.")
             self.client = None
         else:
+            if not self.api_key.startswith("gsk_"):
+                logger.warning("⚠️ GROQ_API_KEY does not look like a Groq key (should start with 'gsk_').")
             self.client = httpx.Client(
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=60.0
@@ -124,7 +156,8 @@ class AIService:
             full_user_prompt += "\n\nIMPORTANT: Output ONLY valid JSON."
             
         last_error = None
-        
+        failures = set()
+
         # Try models in order
         for model in self.models:
             logger.info(f"🤖 Attempting AI call with model: {model}...")
@@ -141,12 +174,21 @@ class AIService:
                     "reasoning_effort": "low"
                 })
                 
-                # Auth error - Stop immediately
-                if response.status_code == 401:
+                # Auth error - no point trying the other models
+                if response.status_code in (401, 403):
+                    self.last_error = f"{model}: HTTP {response.status_code} - key rejected"
+                    logger.error(f"❌ Groq rejected the API key (HTTP {response.status_code})")
                     return {
                         "success": False,
-                        "error": "Invalid API key. Please check your GROQ_API_KEY."
+                        "error": "The AI service rejected the API key. Please check GROQ_API_KEY."
                     }
+
+                if response.status_code == 429:
+                    failures.add("rate_limit")
+                    last_error = f"{model}: rate limited (429)"
+                    logger.warning(f"⚠️ Rate limited on {model}, trying the next model")
+                    continue
+
                 response.raise_for_status()
                 
                 data = response.json()
@@ -194,18 +236,39 @@ class AIService:
                     "usage": usage
                 }
 
+            except httpx.LocalProtocolError as e:
+                # Usually a malformed key value (stray newline, space or quote)
+                failures.add("config")
+                last_error = f"{model}: {e}"
+                logger.error(f"❌ Could not send request for {model}: {e}")
+                continue
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.ProxyError) as e:
+                failures.add("connection")
+                last_error = f"{model}: {type(e).__name__} - {e}"
+                logger.warning(f"⚠️ Could not reach Groq for {model}: {e}")
+                continue
             except Exception as e:
-                last_error = str(e)
-                logger.warning(f"⚠️ AI Error with {model}: {last_error}")
-                
-                # Rate limit, timeout or server error - Continue to next model
+                failures.add("other")
+                last_error = f"{model}: {e}"
+                logger.warning(f"⚠️ AI Error with {model}: {e}")
                 continue
 
-        # If we get here, all models failed
-        logger.error("❌ All models failed.")
+        # Every model failed - report why, so the cause is visible in production
+        self.last_error = last_error
+        logger.error(f"❌ All models failed. Last error: {last_error}")
+
+        if "config" in failures:
+            error = "The AI request could not be sent. Check the GROQ_API_KEY value for stray spaces or line breaks."
+        elif "connection" in failures and "rate_limit" not in failures:
+            error = "Could not reach the AI service. Please try again shortly."
+        elif "rate_limit" in failures:
+            error = "Server is busy due to high demand. Please try again in a minute: https://buymeacoffee.com/manojthapa"
+        else:
+            error = "The AI service failed to respond. Please try again shortly."
+
         return {
             "success": False,
-            "error": "Server is busy due to high demand. Please help keep the servers running: https://buymeacoffee.com/manojthapa",
+            "error": error,
             "details": last_error
         }
     
