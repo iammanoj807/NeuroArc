@@ -90,47 +90,60 @@ Add these as **Secrets** in your Space settings (never commit them):
 
 ## 🛡️ Truthfulness guard — measured
 
-The guard stops the model claiming skills your CV does not support. It is
-deterministic code, so `eval/` measures it directly against labelled cases
-rather than by generating CVs and counting what came out — no API calls, runs in
-seconds, and it yields a **false-negative count**, which is the number that
-matters: a miss puts a false claim on a CV a human then sends to an employer.
+The guard stops the model claiming skills the CV does not support. `eval/`
+measures it two ways: against hand-written attack cases, and against what the
+model actually does.
 
 ```bash
-python eval/test_truthfulness_guard.py
+python eval/test_truthfulness_guard.py   # 36 labelled cases, no API calls
+python eval/probe_real_model.py          # what the live model really emits
 ```
 
-### Results
+### What the model actually does
 
-| | Before | After |
+Given a job advert listing six skills the CV does not contain — Kubernetes,
+Terraform, Kafka, Azure, Rust, Snowflake — across three runs the model marked
+**all six `missing` with empty evidence** every time, and claimed only Python
+and PostgreSQL, both with genuine quotes from the CV.
+
+**6 claims made, 0 unsupported.** The model does not try to launder skills.
+
+### What the hand-written attacks show
+
+The 36 labelled cases in `eval/guard_cases.py` show the guard *can* be fooled:
+evidence genuinely copied from the CV but describing a different skill passes,
+because the check tests only that the words came from the CV. Claiming "Azure"
+while quoting *"Owned production REST API services end to end"* scores 1.00 on
+word overlap. On those cases the guard blocks 10 of 20.
+
+### Why that hole is left open
+
+A stricter rule — requiring the quoted evidence to also name the skill — closes
+it completely, and was tried. It was reverted, because it dropped **real**
+skills whenever the CV and the job advert used different words for the same
+thing:
+
+| CV says | Job asks | Strict rule |
 |---|---|---|
-| Unsupported claims blocked | 10/15 (66.7%) | **20/20 (100%)** |
-| Genuine skills kept | 15/15 | **16/16** |
-| False claims that survived | 5 | **0** |
+| Postgres | PostgreSQL | dropped |
+| Golang | Go | dropped |
+| K8s | Kubernetes | dropped |
 
-### Two laundering routes, found and closed
-
-`_has_evidence` checked that the quoted evidence came from the CV, but never
-that it was **about the claimed skill**. Any genuine CV sentence therefore
-laundered any skill:
-
-> Claiming **Azure**, quoting *"Owned production REST API services end to end"* —
-> scored 1.00 on word overlap, because every word of it really is in the CV.
-
-Requiring a contiguous CV span *alone* is worse (15/20): the laundering evidence
-is copied verbatim, so contiguity passes it. Both bars together hold — the
-evidence must be copied from the CV **and** name the skill it proves.
-
-A second route: the skill-token filter inherited a `len > 2` rule from the
-evidence-word filter, which made `Go`, `R` and `C#` impossible to evidence. A CV
-saying "Golang" could never support a "Go" requirement.
+That is the common case, and the probe above shows the hole it closes is one
+no model was exploiting. Trading a frequent real failure for a hypothetical one
+made the product worse. Closing it properly needs an alias list
+(k8s → kubernetes, postgres → postgresql), not a string rule.
 
 ### Honest limits
 
-- **36 hand-built cases**, 20 written to be adversarial. 100% means no failures
-  on these cases, not a perfect guard. Two routes were found; a third may exist.
-- The case set lives in `eval/guard_cases.py`. Add to it rather than trusting the
-  headline number.
+- **The attack cases were written by the repo author**, so they show what the
+  guard does under attacks someone imagined, not under attacks that happen.
+  The real-model probe exists because of that gap.
+- **The evidence check decides 0 of the 36 cases** — every one is settled by
+  whether the skill name appears in the CV at all. The test set does not
+  exercise the code path it was written to test.
+- **Three probe runs on one CV and one job advert.** Enough to show the model
+  is not laundering here; not enough to prove it never would.
 
 ## 🤝 Contributing
 

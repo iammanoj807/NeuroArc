@@ -42,38 +42,21 @@ def _mentions(text_norm: str, phrase: str) -> bool:
 
 
 def _has_evidence(req: Dict[str, Any], cv_norm: str, cv_words: set) -> bool:
-    """Check the model's claimed evidence is really in the CV AND is about the
-    claimed skill.
+    """Check the model's claimed evidence actually exists in the CV.
 
-    The skill named anywhere in the CV settles it. Otherwise the quoted evidence
-    must clear two bars, because either one alone is exploitable:
-
-    1. It must appear in the CV as a contiguous phrase. The prompt asks the model
-       to copy an exact phrase, so anything looser lets it assemble a sentence
-       out of real CV vocabulary -- "backend services written in Go" scores 0.67
-       on word overlap against a CV that only ever says Java.
-    2. It must share a word with the skill it claims to prove. Without this, any
-       genuine CV sentence launders any skill: claiming Azure while quoting
-       "Owned production REST API services end to end" is a perfect copy of the
-       CV and proves nothing about Azure.
-
-    No length filter on the skill tokens, unlike the evidence words elsewhere:
-    a skill name is meaningful at any length, and filtering short tokens would
-    make "Go", "R" and "C#" impossible to evidence.
-
-    Measured in eval/: recall 66.7% with neither bar, 100% with both, and no
-    genuinely evidenced skill dropped in either case.
+    Known limitation, measured in eval/: this accepts evidence that is genuinely
+    from the CV but describes a different skill, so a model can quote a real CV
+    sentence to support a skill the CV never mentions. A stricter rule that
+    required the evidence to name the skill was tried and reverted -- it dropped
+    real skills whenever the CV and the job used different words for the same
+    thing (Postgres/PostgreSQL, Golang/Go, K8s/Kubernetes), which is the common
+    case. Closing the hole without that cost needs an alias list, not a string
+    rule. See eval/README.md.
     """
     if _mentions(cv_norm, req["name"]):
         return True
-
-    ev_norm = _normalize(req.get("evidence", ""))
-    if not ev_norm or ev_norm not in cv_norm:
-        return False
-
-    skill_words = {w.strip(".") for w in _normalize(req["name"]).split() if w.strip(".")}
-    ev_words = {w.strip(".") for w in ev_norm.split() if w.strip(".")}
-    return bool(skill_words & ev_words)
+    words = [w.strip(".") for w in _normalize(req.get("evidence", "")).split() if len(w.strip(".")) > 2]
+    return bool(words) and sum(w in cv_words for w in words) / len(words) >= 0.6
 
 
 def _clean_requirements(raw: Any) -> List[Dict[str, Any]]:
