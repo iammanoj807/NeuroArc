@@ -44,14 +44,14 @@ def _mentions(text_norm: str, phrase: str) -> bool:
 def _has_evidence(req: Dict[str, Any], cv_norm: str, cv_words: set) -> bool:
     """Check the model's claimed evidence actually exists in the CV.
 
-    Known limitation, measured in eval/: this accepts evidence that is genuinely
+    Known limitation, documented in README.md: this accepts evidence that is genuinely
     from the CV but describes a different skill, so a model can quote a real CV
     sentence to support a skill the CV never mentions. A stricter rule that
     required the evidence to name the skill was tried and reverted -- it dropped
     real skills whenever the CV and the job used different words for the same
     thing (Postgres/PostgreSQL, Golang/Go, K8s/Kubernetes), which is the common
     case. Closing the hole without that cost needs an alias list, not a string
-    rule. See eval/README.md.
+    rule. See the "Evidence guard" section in README.md.
     """
     if _mentions(cv_norm, req["name"]):
         return True
